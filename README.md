@@ -28,6 +28,8 @@ Built with Kotlin, Jetpack Compose, Room, and no network dependencies.
   - **DOCX** — editable WordprocessingML document.
   - **PDF** — paginated A4 document with page breaks for long content.
   - **JSON** — valid import schema, ready to re-import.
+- For DOCX and PDF, choose whether answers appear below each question or in
+  an answer section at the end. The end section always starts on a new page.
 - Choose whether to include answers and pick the file name and save location in
   Android's document picker.
 - Rendered exports label categories with their full slash-separated path
@@ -117,7 +119,7 @@ Run the unit tests and lint with:
 sh gradlew :app:testDebugUnitTest :app:lintDebug $MCQ_AAPT2_OVERRIDE --no-daemon
 ```
 
-The 43 JVM tests cover JSON validation (including nested categories),
+The 44 JVM tests cover JSON validation (including nested categories),
 round-tripping, randomized selection, answer associations, and the
 HTML/DOCX/PDF/JSON exporters.
 

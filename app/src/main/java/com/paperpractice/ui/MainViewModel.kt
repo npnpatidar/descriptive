@@ -581,6 +581,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         scope: ExportScope,
         format: ExportFormat,
         includeAnswers: Boolean,
+        answersAtEnd: Boolean,
         rawFileName: String
     ): CreateDocumentRequest? {
         val paper = selectedPaper
@@ -640,7 +641,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return null
         }
 
-        pendingExport = PendingExport(content, format, includeAnswers, fileName)
+        pendingExport = PendingExport(
+            content = content,
+            format = format,
+            includeAnswers = includeAnswers,
+            answersAtEnd = includeAnswers && answersAtEnd && format.supportsAnswersAtEnd,
+            fileName = fileName
+        )
         exportState = ExportUiState()
         return CreateDocumentRequest(format.mimeType, fileName)
     }
@@ -678,12 +685,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             ExportFormat.DOCX -> DocxExporter.write(
                                 pending.content,
                                 pending.includeAnswers,
+                                pending.answersAtEnd,
                                 stream
                             )
 
                             ExportFormat.PDF -> PdfExporter.write(
                                 pending.content,
                                 pending.includeAnswers,
+                                pending.answersAtEnd,
                                 stream
                             )
 
@@ -762,6 +771,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val content: com.paperpractice.domain.PaperContent,
         val format: ExportFormat,
         val includeAnswers: Boolean,
+        val answersAtEnd: Boolean,
         val fileName: String
     )
 }

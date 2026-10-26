@@ -95,6 +95,10 @@ Export Options
   create headings for empty ancestor levels.
 - Do not indent question text by category depth; questions start at the left
   margin in every rendered format.
+- For DOCX and PDF, allow answers to be placed either below each question or in
+  a separate answer section after all questions.
+- When answers are placed at the end, start the answer section on a new page and
+  number its entries to match the questions.
 - Display appropriate success or error messages.
 
 FR-8: HTML Export Requirements

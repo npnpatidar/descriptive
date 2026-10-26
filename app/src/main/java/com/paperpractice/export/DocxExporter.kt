@@ -14,7 +14,12 @@ import java.util.zip.ZipOutputStream
  */
 object DocxExporter {
 
-    fun write(content: PaperContent, includeAnswers: Boolean, output: OutputStream) {
+    fun write(
+        content: PaperContent,
+        includeAnswers: Boolean,
+        answersAtEnd: Boolean,
+        output: OutputStream
+    ) {
         val zip = ZipOutputStream(output)
         zip.putNextEntry(ZipEntry("[Content_Types].xml"))
         zip.write(CONTENT_TYPES.toByteArray(Charsets.UTF_8))
@@ -25,14 +30,20 @@ object DocxExporter {
         zip.closeEntry()
 
         zip.putNextEntry(ZipEntry("word/document.xml"))
-        zip.write(documentXml(content, includeAnswers).toByteArray(Charsets.UTF_8))
+        zip.write(
+            documentXml(content, includeAnswers, answersAtEnd).toByteArray(Charsets.UTF_8)
+        )
         zip.closeEntry()
 
         zip.finish()
         zip.flush()
     }
 
-    private fun documentXml(content: PaperContent, includeAnswers: Boolean): String {
+    private fun documentXml(
+        content: PaperContent,
+        includeAnswers: Boolean,
+        answersAtEnd: Boolean
+    ): String {
         val totalLabel = if (content.questionCount == 1) "1 question" else {
             "${content.questionCount} questions"
         }
@@ -72,6 +83,7 @@ object DocxExporter {
         )
 
         var number = 1
+        val answers = mutableListOf<Pair<Int, String>>()
 
         fun appendCategory(
             category: CategoryContent,
@@ -112,31 +124,36 @@ object DocxExporter {
                                     color = "1E2433"
                                 )
                             ),
-                            spacingAfter = if (includeAnswers) 100 else 220
+                            spacingAfter = if (includeAnswers && !answersAtEnd) 100 else 220
                         )
                     )
 
                     if (includeAnswers) {
-                        body.append(
-                            paragraph(
-                                runs = listOf(
-                                    Run(
-                                        text = "Answer: ",
-                                        bold = true,
-                                        sizeHalfPoints = 20,
-                                        color = "646B7C"
+                        val answerText = question.answerText.ifEmpty { "(No answer provided)" }
+                        if (answersAtEnd) {
+                            answers += number to answerText
+                        } else {
+                            body.append(
+                                paragraph(
+                                    runs = listOf(
+                                        Run(
+                                            text = "Answer: ",
+                                            bold = true,
+                                            sizeHalfPoints = 20,
+                                            color = "646B7C"
+                                        ),
+                                        Run(
+                                            text = answerText,
+                                            sizeHalfPoints = 20,
+                                            color = "3B4152",
+                                            italic = question.answerText.isEmpty()
+                                        )
                                     ),
-                                    Run(
-                                        text = question.answerText.ifEmpty { "(No answer provided)" },
-                                        sizeHalfPoints = 20,
-                                        color = "3B4152",
-                                        italic = question.answerText.isEmpty()
-                                    )
-                                ),
-                                spacingAfter = 220,
-                                indentLeft = 360
+                                    spacingAfter = 220,
+                                    indentLeft = 360
+                                )
                             )
-                        )
+                        }
                     }
                     number++
                 }
@@ -154,6 +171,45 @@ object DocxExporter {
 
         content.categories.forEach { category ->
             appendCategory(category, emptyList(), 0)
+        }
+
+        if (includeAnswers && answersAtEnd && answers.isNotEmpty()) {
+            body.append(
+                paragraph(
+                    runs = listOf(
+                        Run(
+                            text = "Answers",
+                            bold = true,
+                            sizeHalfPoints = 32,
+                            color = "3D4D87"
+                        )
+                    ),
+                    spacingAfter = 180,
+                    keepNext = true,
+                    borderBottom = true,
+                    pageBreakBefore = true
+                )
+            )
+            answers.forEach { (answerNumber, answerText) ->
+                body.append(
+                    paragraph(
+                        runs = listOf(
+                            Run(
+                                text = "$answerNumber. ",
+                                bold = true,
+                                sizeHalfPoints = 21,
+                                color = "3D4D87"
+                            ),
+                            Run(
+                                text = answerText,
+                                sizeHalfPoints = 21,
+                                color = "1E2433"
+                            )
+                        ),
+                        spacingAfter = 140
+                    )
+                )
+            }
         }
 
         body.append(
@@ -200,18 +256,20 @@ object DocxExporter {
         spacingAfter: Int = 120,
         indentLeft: Int = 0,
         keepNext: Boolean = false,
-        borderBottom: Boolean = false
+        borderBottom: Boolean = false,
+        pageBreakBefore: Boolean = false
     ): String = buildString {
         append("<w:p><w:pPr>")
-        append("<w:spacing w:before=\"$spacingBefore\" w:after=\"$spacingAfter\"/>")
         if (keepNext) append("<w:keepNext/>")
-        if (indentLeft > 0) append("<w:ind w:left=\"$indentLeft\"/>")
+        if (pageBreakBefore) append("<w:pageBreakBefore/>")
         if (borderBottom) {
             append(
                 "<w:pBdr><w:bottom w:val=\"single\" w:sz=\"8\" w:space=\"4\" " +
                     "w:color=\"D8D3C6\"/></w:pBdr>"
             )
         }
+        append("<w:spacing w:before=\"$spacingBefore\" w:after=\"$spacingAfter\"/>")
+        if (indentLeft > 0) append("<w:ind w:left=\"$indentLeft\"/>")
         append("</w:pPr>")
 
         runs.forEach { run ->

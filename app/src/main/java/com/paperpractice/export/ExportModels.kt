@@ -26,7 +26,8 @@ enum class ExportFormat(
     val label: String,
     val extension: String,
     val mimeType: String,
-    val description: String
+    val description: String,
+    val supportsAnswersAtEnd: Boolean = false
 ) {
     HTML(
         "HTML",
@@ -38,13 +39,15 @@ enum class ExportFormat(
         "DOCX",
         "docx",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "An editable Microsoft Word document."
+        "An editable Microsoft Word document.",
+        supportsAnswersAtEnd = true
     ),
     PDF(
         "PDF",
         "pdf",
         "application/pdf",
-        "A paginated document ready to print."
+        "A paginated document ready to print.",
+        supportsAnswersAtEnd = true
     ),
     JSON(
         "JSON",

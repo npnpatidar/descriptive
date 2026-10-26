@@ -210,7 +210,12 @@ class ExportersTest {
         assertTrue(html.contains("What is force?"))
 
         val docx = ByteArrayOutputStream().also {
-            DocxExporter.write(deep, includeAnswers = true, output = it)
+            DocxExporter.write(
+                deep,
+                includeAnswers = true,
+                answersAtEnd = false,
+                output = it
+            )
         }.toByteArray()
         val documentXml = unzip(docx)["word/document.xml"]!!.toString(Charsets.UTF_8)
         assertTrue(documentXml.contains("Science/Physics/Mechanics"))
@@ -370,7 +375,12 @@ class ExportersTest {
     @Test
     fun docxIsAValidZipWithWellFormedWordXml() {
         val bytes = ByteArrayOutputStream().also {
-            DocxExporter.write(content, includeAnswers = true, output = it)
+            DocxExporter.write(
+                content,
+                includeAnswers = true,
+                answersAtEnd = false,
+                output = it
+            )
         }.toByteArray()
 
         val entries = unzip(bytes)
@@ -383,6 +393,7 @@ class ExportersTest {
         assertTrue(text.contains("Alliances, militarism &amp; nationalism."))
         assertTrue(text.contains("Answer:"))
         assertTrue(text.contains("<w:br/>"))
+        assertFalse(text.contains("<w:pageBreakBefore/>"))
 
         val factory = DocumentBuilderFactory.newInstance()
         factory.isNamespaceAware = true
@@ -394,7 +405,12 @@ class ExportersTest {
     @Test
     fun docxCanOmitAnswers() {
         val bytes = ByteArrayOutputStream().also {
-            DocxExporter.write(content, includeAnswers = false, output = it)
+            DocxExporter.write(
+                content,
+                includeAnswers = false,
+                answersAtEnd = false,
+                output = it
+            )
         }.toByteArray()
 
         val text = unzip(bytes)["word/document.xml"]!!.toString(Charsets.UTF_8)
@@ -405,9 +421,40 @@ class ExportersTest {
     }
 
     @Test
+    fun docxCanPlaceAnswersOnNewPageAtEnd() {
+        val bytes = ByteArrayOutputStream().also {
+            DocxExporter.write(
+                content,
+                includeAnswers = true,
+                answersAtEnd = true,
+                output = it
+            )
+        }.toByteArray()
+
+        val text = unzip(bytes)["word/document.xml"]!!.toString(Charsets.UTF_8)
+
+        val answersIndex = text.indexOf("Answers")
+        val pageBreakIndex = text.indexOf("<w:pageBreakBefore/>")
+        val lastQuestionIndex = text.indexOf("State Newton&apos;s second law.")
+        val firstAnswerIndex = text.indexOf("Alliances, militarism &amp; nationalism.")
+
+        assertTrue(answersIndex > lastQuestionIndex)
+        assertTrue(pageBreakIndex > lastQuestionIndex)
+        assertTrue(pageBreakIndex < answersIndex)
+        assertTrue(firstAnswerIndex > answersIndex)
+        assertTrue(text.indexOf("(No answer provided)") > answersIndex)
+        assertFalse(text.contains("Answer:"))
+    }
+
+    @Test
     fun docxReportsMissingAnswerWithoutLosingQuestion() {
         val jsonBytes = ByteArrayOutputStream().also {
-            DocxExporter.write(content, includeAnswers = true, output = it)
+            DocxExporter.write(
+                content,
+                includeAnswers = true,
+                answersAtEnd = false,
+                output = it
+            )
         }.toByteArray()
 
         val text = unzip(jsonBytes)["word/document.xml"]!!.toString(Charsets.UTF_8)
@@ -417,10 +464,20 @@ class ExportersTest {
     @Test
     fun docxBytesAreDeterministicEnoughToRoundTrip() {
         val first = ByteArrayOutputStream().also {
-            DocxExporter.write(content, includeAnswers = true, output = it)
+            DocxExporter.write(
+                content,
+                includeAnswers = true,
+                answersAtEnd = false,
+                output = it
+            )
         }.toByteArray()
         val second = ByteArrayOutputStream().also {
-            DocxExporter.write(content, includeAnswers = true, output = it)
+            DocxExporter.write(
+                content,
+                includeAnswers = true,
+                answersAtEnd = false,
+                output = it
+            )
         }.toByteArray()
 
         // The ZIP container carries timestamps, so compare the document part.

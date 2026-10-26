@@ -77,6 +77,7 @@ fun ExportScreen(
     var scope by rememberSaveable(paper?.id) { mutableStateOf(initialScope) }
     var format by rememberSaveable(paper?.id) { mutableStateOf(ExportFormat.HTML) }
     var includeAnswers by rememberSaveable(paper?.id) { mutableStateOf(true) }
+    var answersAtEnd by rememberSaveable(paper?.id) { mutableStateOf(false) }
     var fileName by rememberSaveable(paper?.id) {
         mutableStateOf(viewModel.suggestedFileName())
     }
@@ -234,10 +235,12 @@ fun ExportScreen(
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            if (includeAnswers) {
-                                "Answers appear below each question."
-                            } else {
+                            if (!includeAnswers) {
                                 "A question-only document will be created."
+                            } else if (format.supportsAnswersAtEnd && answersAtEnd) {
+                                "Answers are collected in a separate section at the end."
+                            } else {
+                                "Answers appear below each question."
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -246,9 +249,53 @@ fun ExportScreen(
                     Spacer(Modifier.width(12.dp))
                     Switch(
                         checked = includeAnswers,
-                        onCheckedChange = { includeAnswers = it },
+                        onCheckedChange = {
+                            includeAnswers = it
+                            if (!it) answersAtEnd = false
+                        },
                         enabled = !viewModel.exportState.isExporting
                     )
+                }
+            }
+
+            if (format.supportsAnswersAtEnd) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Put answers at the end",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                when {
+                                    !includeAnswers ->
+                                        "Turn on Include answers to use a separate answer section."
+                                    answersAtEnd ->
+                                        "Questions come first, then an answer section on a new page."
+                                    else ->
+                                        "Answers appear below each question."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(
+                            checked = answersAtEnd,
+                            onCheckedChange = { answersAtEnd = it },
+                            enabled = includeAnswers && !viewModel.exportState.isExporting
+                        )
+                    }
                 }
             }
 
@@ -287,6 +334,7 @@ fun ExportScreen(
                         scope = scope,
                         format = format,
                         includeAnswers = includeAnswers,
+                        answersAtEnd = answersAtEnd,
                         rawFileName = fileName
                     )
                     if (request != null) createDocument.launch(request)

@@ -17,7 +17,12 @@ import java.io.OutputStream
  */
 object PdfExporter {
 
-    fun write(content: PaperContent, includeAnswers: Boolean, output: OutputStream) {
+    fun write(
+        content: PaperContent,
+        includeAnswers: Boolean,
+        answersAtEnd: Boolean,
+        output: OutputStream
+    ) {
         val document = PdfDocument()
         try {
             val writer = PageWriter(document, content.paperName)
@@ -26,6 +31,7 @@ object PdfExporter {
                 writer.drawBody("This paper contains no categories.", spacingAfter = 12f)
             }
             var number = 1
+            val answers = mutableListOf<Pair<Int, String>>()
 
             fun appendCategory(
                 category: CategoryContent,
@@ -35,10 +41,18 @@ object PdfExporter {
                 if (category.questions.isNotEmpty()) {
                     writer.drawCategory(categoryExportName(parentPath, category.categoryName))
                     category.questions.forEach { question ->
-                        writer.drawQuestion(number, question.questionText, includeAnswers)
+                        writer.drawQuestion(
+                            number,
+                            question.questionText,
+                            includeAnswers && !answersAtEnd
+                        )
                         if (includeAnswers) {
                             val answer = question.answerText.ifEmpty { "(No answer provided)" }
-                            writer.drawAnswer(answer)
+                            if (answersAtEnd) {
+                                answers += number to answer
+                            } else {
+                                writer.drawAnswer(answer)
+                            }
                         }
                         number++
                     }
@@ -50,6 +64,13 @@ object PdfExporter {
 
             content.categories.forEach { category ->
                 appendCategory(category, emptyList())
+            }
+
+            if (includeAnswers && answersAtEnd && answers.isNotEmpty()) {
+                writer.startAnswerSection()
+                answers.forEach { (answerNumber, answerText) ->
+                    writer.drawAnswerEntry(answerNumber, answerText)
+                }
             }
             writer.finish()
             document.writeTo(output)
@@ -150,6 +171,20 @@ object PdfExporter {
                 paint = bodyPaint,
                 lineHeight = 16f,
                 spacingAfter = if (includeAnswers) 5f else 14f
+            )
+        }
+
+        fun startAnswerSection() {
+            if (page != null) newPage()
+            drawCategory("Answers")
+        }
+
+        fun drawAnswerEntry(number: Int, text: String) {
+            drawBlock(
+                text = "$number. $text",
+                paint = bodyPaint,
+                lineHeight = 16f,
+                spacingAfter = 12f
             )
         }
 
