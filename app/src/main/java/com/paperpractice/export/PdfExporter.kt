@@ -32,14 +32,16 @@ object PdfExporter {
                 parentPath: List<String>
             ) {
                 val path = parentPath + category.categoryName
-                writer.drawCategory(categoryExportName(parentPath, category.categoryName))
-                category.questions.forEach { question ->
-                    writer.drawQuestion(number, question.questionText, includeAnswers)
-                    if (includeAnswers) {
-                        val answer = question.answerText.ifEmpty { "(No answer provided)" }
-                        writer.drawAnswer(answer)
+                if (category.questions.isNotEmpty()) {
+                    writer.drawCategory(categoryExportName(parentPath, category.categoryName))
+                    category.questions.forEach { question ->
+                        writer.drawQuestion(number, question.questionText, includeAnswers)
+                        if (includeAnswers) {
+                            val answer = question.answerText.ifEmpty { "(No answer provided)" }
+                            writer.drawAnswer(answer)
+                        }
+                        number++
                     }
-                    number++
                 }
                 category.categories.forEach { child ->
                     appendCategory(child, path)
@@ -284,6 +286,13 @@ object PdfExporter {
             val normalized = text.replace("\r\n", "\n").replace('\r', '\n')
             val lines = mutableListOf<String>()
 
+            // Keep a trailing space on wrapped lines. It is invisible on the
+            // page but prevents words running together when a PDF viewer
+            // extracts or copies the text.
+            fun addLine(value: String) {
+                lines += if (value.isEmpty()) "" else "$value "
+            }
+
             normalized.split('\n').forEach { paragraph ->
                 if (paragraph.isEmpty()) {
                     lines += ""
@@ -299,7 +308,7 @@ object PdfExporter {
                             line = StringBuilder(candidate)
                         } else {
                             if (line.isNotEmpty()) {
-                                lines += line.toString()
+                                addLine(line.toString())
                                 line = StringBuilder()
                             }
                             if (paint.measureText(word) <= maxWidth) {
@@ -310,7 +319,7 @@ object PdfExporter {
                                 word.forEach { character ->
                                     val attempt = line.toString() + character
                                     if (paint.measureText(attempt) > maxWidth && line.isNotEmpty()) {
-                                        lines += line.toString()
+                                        addLine(line.toString())
                                         line = StringBuilder()
                                     }
                                     line.append(character)
@@ -318,7 +327,7 @@ object PdfExporter {
                             }
                         }
                     }
-                if (line.isNotEmpty()) lines += line.toString()
+                if (line.isNotEmpty()) addLine(line.toString())
             }
 
             return if (lines.isEmpty()) listOf("") else lines

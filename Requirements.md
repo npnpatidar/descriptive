@@ -91,6 +91,8 @@ Export Options
 - Preserve question numbering, category headings, and question-answer associations.
 - In HTML, DOCX, and PDF, show each category heading as its full slash-separated
   path (for example `Science/Physics/Mechanics`).
+- Render a heading only for categories that directly contain questions; do not
+  create headings for empty ancestor levels.
 - Do not indent question text by category depth; questions start at the left
   margin in every rendered format.
 - Display appropriate success or error messages.

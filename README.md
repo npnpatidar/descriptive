@@ -31,8 +31,10 @@ Built with Kotlin, Jetpack Compose, Room, and no network dependencies.
 - Choose whether to include answers and pick the file name and save location in
   Android's document picker.
 - Rendered exports label categories with their full slash-separated path
-  (`Science/Physics/Mechanics`) and keep questions at the left margin. JSON
-  exports keep the nested tree and round-trip through import.
+  (`Science/Physics/Mechanics`) and keep questions at the left margin. Headings
+  are emitted only where a category directly owns questions, so empty ancestor
+  levels do not create blank sections. JSON exports keep the nested tree and
+  round-trip through import.
 
 ## Screens
 

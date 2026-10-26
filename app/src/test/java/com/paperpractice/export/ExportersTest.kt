@@ -177,8 +177,8 @@ class ExportersTest {
         assertEquals(1, reparsed.questionCount)
 
         val html = HtmlExporter.build(nested, includeAnswers = true)
-        assertTrue(html.contains("<h2>Science</h2>"))
-        assertTrue(html.contains("<h3>Science/Physics</h3>"))
+        assertFalse(html.contains("<h2>Science</h2>"))
+        assertTrue(html.contains("<h2>Science/Physics</h2>"))
     }
 
     @Test
@@ -206,7 +206,7 @@ class ExportersTest {
         )
 
         val html = HtmlExporter.build(deep, includeAnswers = true)
-        assertTrue(html.contains("<h4>Science/Physics/Mechanics</h4>"))
+        assertTrue(html.contains("<h2>Science/Physics/Mechanics</h2>"))
         assertTrue(html.contains("What is force?"))
 
         val docx = ByteArrayOutputStream().also {

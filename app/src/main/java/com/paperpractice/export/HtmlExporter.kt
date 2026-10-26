@@ -24,39 +24,49 @@ object HtmlExporter {
             fun appendCategory(
                 category: com.paperpractice.domain.CategoryContent,
                 parentPath: List<String>,
-                depth: Int
+                headingDepth: Int
             ) {
                 val path = parentPath + category.categoryName
-                appendLine("<section class=\"category\">")
-                val headingLevel = (depth + 2).coerceAtMost(6)
-                appendLine(
-                    "<h$headingLevel>${escape(categoryExportName(parentPath, category.categoryName))}" +
-                        "</h$headingLevel>"
-                )
-                category.questions.forEach { question ->
-                    appendLine("<article class=\"question\">")
-                    appendLine("<div class=\"question-heading\">")
-                    appendLine("<span class=\"number\">$number</span>")
-                    appendLine("<div class=\"question-text\">${escape(question.questionText)}</div>")
-                    appendLine("</div>")
-                    if (includeAnswers) {
-                        appendLine("<div class=\"answer\" hidden>")
-                        appendLine("<span class=\"answer-label\">Answer</span>")
-                        val answer = if (question.answerText.isEmpty()) {
-                            "<span class=\"empty-answer\">(No answer provided)</span>"
-                        } else {
-                            escape(question.answerText)
-                        }
-                        appendLine("<div class=\"answer-text\">$answer</div>")
+                if (category.questions.isNotEmpty()) {
+                    appendLine("<section class=\"category\">")
+                    val headingLevel = (headingDepth + 2).coerceAtMost(6)
+                    appendLine(
+                        "<h$headingLevel>${escape(categoryExportName(parentPath, category.categoryName))}" +
+                            "</h$headingLevel>"
+                    )
+                    category.questions.forEach { question ->
+                        appendLine("<article class=\"question\">")
+                        appendLine("<div class=\"question-heading\">")
+                        appendLine("<span class=\"number\">$number</span>")
+                        appendLine(
+                            "<div class=\"question-text\">${escape(question.questionText)}</div>"
+                        )
                         appendLine("</div>")
+                        if (includeAnswers) {
+                            appendLine("<div class=\"answer\" hidden>")
+                            appendLine("<span class=\"answer-label\">Answer</span>")
+                            val answer = if (question.answerText.isEmpty()) {
+                                "<span class=\"empty-answer\">(No answer provided)</span>"
+                            } else {
+                                escape(question.answerText)
+                            }
+                            appendLine("<div class=\"answer-text\">$answer</div>")
+                            appendLine("</div>")
+                        }
+                        appendLine("</article>")
+                        number++
                     }
-                    appendLine("</article>")
-                    number++
+                    appendLine("</section>")
+                }
+
+                val childHeadingDepth = if (category.questions.isNotEmpty()) {
+                    headingDepth + 1
+                } else {
+                    headingDepth
                 }
                 category.categories.forEach { child ->
-                    appendCategory(child, path, depth + 1)
+                    appendCategory(child, path, childHeadingDepth)
                 }
-                appendLine("</section>")
             }
 
             appendLine("<!DOCTYPE html>")
@@ -170,7 +180,6 @@ object HtmlExporter {
         button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
         @media (prefers-color-scheme: dark) { button { color: #14161d; } }
         .category { margin: 2rem 0 0; }
-        .category .category { margin: 1.1rem 0 0; }
         .category h2 {
           margin: 0 0 .85rem;
           padding-bottom: .45rem;

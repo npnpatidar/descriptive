@@ -76,72 +76,79 @@ object DocxExporter {
         fun appendCategory(
             category: CategoryContent,
             parentPath: List<String>,
-            depth: Int
+            headingDepth: Int
         ) {
             val path = parentPath + category.categoryName
-            body.append(
-                paragraph(
-                    runs = listOf(
-                        Run(
-                            text = categoryExportName(parentPath, category.categoryName),
-                            bold = true,
-                            sizeHalfPoints = (28 - depth * 2).coerceAtLeast(22),
-                            color = "3D4D87"
-                        )
-                    ),
-                    spacingBefore = if (depth == 0) 320 else 220,
-                    spacingAfter = 120,
-                    keepNext = true
-                )
-            )
-
-            category.questions.forEach { question ->
+            if (category.questions.isNotEmpty()) {
                 body.append(
                     paragraph(
                         runs = listOf(
                             Run(
-                                text = "$number. ",
+                                text = categoryExportName(parentPath, category.categoryName),
                                 bold = true,
-                                sizeHalfPoints = 23,
+                                sizeHalfPoints = (28 - headingDepth * 2).coerceAtLeast(22),
                                 color = "3D4D87"
-                            ),
-                            Run(
-                                text = question.questionText,
-                                sizeHalfPoints = 23,
-                                color = "1E2433"
                             )
                         ),
-                        spacingAfter = if (includeAnswers) 100 else 220
+                        spacingBefore = if (headingDepth == 0) 320 else 220,
+                        spacingAfter = 120,
+                        keepNext = true
                     )
                 )
 
-                if (includeAnswers) {
+                category.questions.forEach { question ->
                     body.append(
                         paragraph(
                             runs = listOf(
                                 Run(
-                                    text = "Answer: ",
+                                    text = "$number. ",
                                     bold = true,
-                                    sizeHalfPoints = 20,
-                                    color = "646B7C"
+                                    sizeHalfPoints = 23,
+                                    color = "3D4D87"
                                 ),
                                 Run(
-                                    text = question.answerText.ifEmpty { "(No answer provided)" },
-                                    sizeHalfPoints = 20,
-                                    color = "3B4152",
-                                    italic = question.answerText.isEmpty()
+                                    text = question.questionText,
+                                    sizeHalfPoints = 23,
+                                    color = "1E2433"
                                 )
                             ),
-                            spacingAfter = 220,
-                            indentLeft = 360
+                            spacingAfter = if (includeAnswers) 100 else 220
                         )
                     )
+
+                    if (includeAnswers) {
+                        body.append(
+                            paragraph(
+                                runs = listOf(
+                                    Run(
+                                        text = "Answer: ",
+                                        bold = true,
+                                        sizeHalfPoints = 20,
+                                        color = "646B7C"
+                                    ),
+                                    Run(
+                                        text = question.answerText.ifEmpty { "(No answer provided)" },
+                                        sizeHalfPoints = 20,
+                                        color = "3B4152",
+                                        italic = question.answerText.isEmpty()
+                                    )
+                                ),
+                                spacingAfter = 220,
+                                indentLeft = 360
+                            )
+                        )
+                    }
+                    number++
                 }
-                number++
             }
 
+            val childHeadingDepth = if (category.questions.isNotEmpty()) {
+                headingDepth + 1
+            } else {
+                headingDepth
+            }
             category.categories.forEach { child ->
-                appendCategory(child, path, depth + 1)
+                appendCategory(child, path, childHeadingDepth)
             }
         }
 
