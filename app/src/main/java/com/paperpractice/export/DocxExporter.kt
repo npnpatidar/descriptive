@@ -73,12 +73,17 @@ object DocxExporter {
 
         var number = 1
 
-        fun appendCategory(category: CategoryContent, depth: Int) {
+        fun appendCategory(
+            category: CategoryContent,
+            parentPath: List<String>,
+            depth: Int
+        ) {
+            val path = parentPath + category.categoryName
             body.append(
                 paragraph(
                     runs = listOf(
                         Run(
-                            text = category.categoryName,
+                            text = categoryExportName(parentPath, category.categoryName),
                             bold = true,
                             sizeHalfPoints = (28 - depth * 2).coerceAtLeast(22),
                             color = "3D4D87"
@@ -86,7 +91,6 @@ object DocxExporter {
                     ),
                     spacingBefore = if (depth == 0) 320 else 220,
                     spacingAfter = 120,
-                    indentLeft = depth * 360,
                     keepNext = true
                 )
             )
@@ -107,8 +111,7 @@ object DocxExporter {
                                 color = "1E2433"
                             )
                         ),
-                        spacingAfter = if (includeAnswers) 100 else 220,
-                        indentLeft = depth * 360
+                        spacingAfter = if (includeAnswers) 100 else 220
                     )
                 )
 
@@ -130,17 +133,21 @@ object DocxExporter {
                                 )
                             ),
                             spacingAfter = 220,
-                            indentLeft = depth * 360 + 360
+                            indentLeft = 360
                         )
                     )
                 }
                 number++
             }
 
-            category.categories.forEach { child -> appendCategory(child, depth + 1) }
+            category.categories.forEach { child ->
+                appendCategory(child, path, depth + 1)
+            }
         }
 
-        content.categories.forEach { category -> appendCategory(category, 0) }
+        content.categories.forEach { category ->
+            appendCategory(category, emptyList(), 0)
+        }
 
         body.append(
             paragraph(

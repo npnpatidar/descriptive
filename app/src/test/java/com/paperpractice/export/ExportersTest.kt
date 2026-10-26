@@ -178,7 +178,115 @@ class ExportersTest {
 
         val html = HtmlExporter.build(nested, includeAnswers = true)
         assertTrue(html.contains("<h2>Science</h2>"))
-        assertTrue(html.contains("<h3>Physics</h3>"))
+        assertTrue(html.contains("<h3>Science/Physics</h3>"))
+    }
+
+    @Test
+    fun renderedExportsShowFullPathsWithoutIndentingQuestions() {
+        val deep = PaperContent(
+            paperName = "Deep",
+            categories = listOf(
+                CategoryContent(
+                    categoryName = "Science",
+                    questions = emptyList(),
+                    categories = listOf(
+                        CategoryContent(
+                            categoryName = "Physics",
+                            questions = emptyList(),
+                            categories = listOf(
+                                CategoryContent(
+                                    categoryName = "Mechanics",
+                                    questions = listOf(QuestionContent("What is force?", "F = ma"))
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        val html = HtmlExporter.build(deep, includeAnswers = true)
+        assertTrue(html.contains("<h4>Science/Physics/Mechanics</h4>"))
+        assertTrue(html.contains("What is force?"))
+
+        val docx = ByteArrayOutputStream().also {
+            DocxExporter.write(deep, includeAnswers = true, output = it)
+        }.toByteArray()
+        val documentXml = unzip(docx)["word/document.xml"]!!.toString(Charsets.UTF_8)
+        assertTrue(documentXml.contains("Science/Physics/Mechanics"))
+        // Questions must stay at the left margin regardless of category depth.
+        assertFalse(documentXml.contains("w:left=\"720\""))
+        assertFalse(documentXml.contains("w:left=\"1080\""))
+    }
+
+    @Test
+    fun exportedJsonIsImportableForEveryExportScope() {
+        val paper = PaperDetail(
+            id = "p",
+            name = "Nested",
+            categories = listOf(
+                CategoryDetail(
+                    id = "science",
+                    name = "Science",
+                    questions = listOf(QuestionDetail("q1", "Parent Q", "A1")),
+                    children = listOf(
+                        CategoryDetail(
+                            id = "physics",
+                            name = "Physics",
+                            questions = listOf(QuestionDetail("q2", "Child Q", "A2")),
+                            children = listOf(
+                                CategoryDetail(
+                                    id = "mechanics",
+                                    name = "Mechanics",
+                                    questions = listOf(QuestionDetail("q3", "Deep Q", "A3"))
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        val session = TestSession(
+            paperId = "p",
+            paperName = "Nested",
+            createdAt = 0,
+            questions = listOf(
+                SessionQuestion(
+                    number = 1,
+                    questionId = "q2",
+                    categoryId = "physics",
+                    categoryName = "Science / Physics",
+                    questionText = "Child Q",
+                    answerText = "A2",
+                    categoryPath = listOf("Science", "Physics")
+                ),
+                SessionQuestion(
+                    number = 2,
+                    questionId = "q3",
+                    categoryId = "mechanics",
+                    categoryName = "Science / Physics / Mechanics",
+                    questionText = "Deep Q",
+                    answerText = "A3",
+                    categoryPath = listOf("Science", "Physics", "Mechanics")
+                )
+            )
+        )
+
+        val exports = listOf(
+            "entire paper" to ExportContentBuilder.entirePaper(paper),
+            "selected categories" to ExportContentBuilder.selectedCategories(
+                paper,
+                setOf("physics")
+            ),
+            "current test" to ExportContentBuilder.currentTest(paper, session)
+        )
+
+        exports.forEach { (scope, content) ->
+            val reparsed = PaperJsonParser.parse(
+                JsonExporter.build(content, includeAnswers = true)
+            )
+            assertEquals(scope, content, reparsed)
+        }
     }
 
     @Test

@@ -27,8 +27,12 @@ object PdfExporter {
             }
             var number = 1
 
-            fun appendCategory(category: CategoryContent, depth: Int) {
-                writer.drawCategory(category.categoryName, depth)
+            fun appendCategory(
+                category: CategoryContent,
+                parentPath: List<String>
+            ) {
+                val path = parentPath + category.categoryName
+                writer.drawCategory(categoryExportName(parentPath, category.categoryName))
                 category.questions.forEach { question ->
                     writer.drawQuestion(number, question.questionText, includeAnswers)
                     if (includeAnswers) {
@@ -37,10 +41,14 @@ object PdfExporter {
                     }
                     number++
                 }
-                category.categories.forEach { child -> appendCategory(child, depth + 1) }
+                category.categories.forEach { child ->
+                    appendCategory(child, path)
+                }
             }
 
-            content.categories.forEach { category -> appendCategory(category, 0) }
+            content.categories.forEach { category ->
+                appendCategory(category, emptyList())
+            }
             writer.finish()
             document.writeTo(output)
         } finally {
@@ -123,14 +131,13 @@ object PdfExporter {
             y += 14f
         }
 
-        fun drawCategory(name: String, depth: Int = 0) {
+        fun drawCategory(name: String) {
             if (page != null) y += 8f
             drawBlock(
                 text = name,
                 paint = categoryPaint,
                 lineHeight = 20f,
                 spacingAfter = 7f,
-                leftIndent = depth * 14f,
                 requiredSpaceAfter = 46f
             )
         }

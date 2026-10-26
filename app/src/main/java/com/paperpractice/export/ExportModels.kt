@@ -65,6 +65,16 @@ data class ExportFeedback(
 )
 
 /**
+ * Visible category labels in rendered documents use the full hierarchy, for
+ * example "Science/Physics/Mechanics". JSON keeps the nested category tree and
+ * leaf names so an exported file can be imported again without any translation.
+ */
+internal fun categoryExportName(
+    parentPath: List<String>,
+    categoryName: String
+): String = (parentPath + categoryName).joinToString("/")
+
+/**
  * Converts the selected scope into the same schema used by import. No exporter
  * has to understand Room entities or the current-tab state.
  */

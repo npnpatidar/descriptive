@@ -21,10 +21,18 @@ object HtmlExporter {
         return buildString {
             var number = 1
 
-            fun appendCategory(category: com.paperpractice.domain.CategoryContent, depth: Int) {
+            fun appendCategory(
+                category: com.paperpractice.domain.CategoryContent,
+                parentPath: List<String>,
+                depth: Int
+            ) {
+                val path = parentPath + category.categoryName
                 appendLine("<section class=\"category\">")
                 val headingLevel = (depth + 2).coerceAtMost(6)
-                appendLine("<h$headingLevel>${escape(category.categoryName)}</h$headingLevel>")
+                appendLine(
+                    "<h$headingLevel>${escape(categoryExportName(parentPath, category.categoryName))}" +
+                        "</h$headingLevel>"
+                )
                 category.questions.forEach { question ->
                     appendLine("<article class=\"question\">")
                     appendLine("<div class=\"question-heading\">")
@@ -45,7 +53,9 @@ object HtmlExporter {
                     appendLine("</article>")
                     number++
                 }
-                category.categories.forEach { child -> appendCategory(child, depth + 1) }
+                category.categories.forEach { child ->
+                    appendCategory(child, path, depth + 1)
+                }
                 appendLine("</section>")
             }
 
@@ -73,7 +83,9 @@ object HtmlExporter {
             appendLine("</header>")
             appendLine("<main id=\"question-list\">")
 
-            content.categories.forEach { category -> appendCategory(category, 0) }
+            content.categories.forEach { category ->
+                appendCategory(category, emptyList(), 0)
+            }
 
             appendLine("</main>")
             appendLine("<footer>Generated offline by Paper Practice.</footer>")
@@ -158,7 +170,7 @@ object HtmlExporter {
         button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
         @media (prefers-color-scheme: dark) { button { color: #14161d; } }
         .category { margin: 2rem 0 0; }
-        .category .category { margin: 1.1rem 0 0 1.1rem; }
+        .category .category { margin: 1.1rem 0 0; }
         .category h2 {
           margin: 0 0 .85rem;
           padding-bottom: .45rem;

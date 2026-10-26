@@ -89,6 +89,10 @@ Export Options
 - Choose whether to include answers, wherever applicable.
 - Specify the filename and save location.
 - Preserve question numbering, category headings, and question-answer associations.
+- In HTML, DOCX, and PDF, show each category heading as its full slash-separated
+  path (for example `Science/Physics/Mechanics`).
+- Do not indent question text by category depth; questions start at the left
+  margin in every rendered format.
 - Display appropriate success or error messages.
 
 FR-8: HTML Export Requirements
@@ -109,6 +113,8 @@ FR-9: DOCX and PDF Export Requirements
 FR-10: JSON Export and Reimport
 
 - Export valid JSON using the application's defined schema.
+- Keep the nested category tree and leaf category names so the file can be
+  imported without changing the paper's structure.
 - Preserve paper names, categories, questions, and answers.
 - Export selected categories as a valid paper structure.
 - Export the current test as a valid JSON paper containing the selected questions.

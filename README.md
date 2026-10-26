@@ -30,8 +30,9 @@ Built with Kotlin, Jetpack Compose, Room, and no network dependencies.
   - **JSON** — valid import schema, ready to re-import.
 - Choose whether to include answers and pick the file name and save location in
   Android's document picker.
-- Nested category headings and full category paths are preserved in tests,
-  practice sessions, and exports.
+- Rendered exports label categories with their full slash-separated path
+  (`Science/Physics/Mechanics`) and keep questions at the left margin. JSON
+  exports keep the nested tree and round-trip through import.
 
 ## Screens
 
@@ -114,7 +115,7 @@ Run the unit tests and lint with:
 sh gradlew :app:testDebugUnitTest :app:lintDebug $MCQ_AAPT2_OVERRIDE --no-daemon
 ```
 
-The 41 JVM tests cover JSON validation (including nested categories),
+The 43 JVM tests cover JSON validation (including nested categories),
 round-tripping, randomized selection, answer associations, and the
 HTML/DOCX/PDF/JSON exporters.
 
