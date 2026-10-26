@@ -173,6 +173,80 @@ class TestGeneratorTest {
         )
     }
 
+    @Test
+    fun nestedCategoryKeepsHierarchyInSessionLabels() {
+        val nestedPaper = PaperDetail(
+            id = "paper-nested",
+            name = "Nested",
+            categories = listOf(
+                CategoryDetail(
+                    id = "science",
+                    name = "Science",
+                    questions = emptyList(),
+                    children = listOf(
+                        CategoryDetail(
+                            id = "physics",
+                            name = "Physics",
+                            questions = listOf(
+                                QuestionDetail("n1", "What is force?", "F = ma")
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        val session = TestGenerator.generate(
+            paper = nestedPaper,
+            selectedCategoryIds = setOf("physics"),
+            requestedCounts = mapOf("physics" to 1),
+            random = Random(5)
+        )
+
+        val question = session.questions.single()
+        assertEquals("Science / Physics", question.categoryName)
+        assertEquals(listOf("Science", "Physics"), question.categoryPath)
+    }
+
+    @Test
+    fun parentCategoryCountIncludesSubcategoryQuestions() {
+        val nestedPaper = PaperDetail(
+            id = "paper-nested-parent",
+            name = "Nested",
+            categories = listOf(
+                CategoryDetail(
+                    id = "science",
+                    name = "Science",
+                    questions = listOf(QuestionDetail("s1", "Parent question?", "A")),
+                    children = listOf(
+                        CategoryDetail(
+                            id = "physics",
+                            name = "Physics",
+                            questions = listOf(QuestionDetail("p1", "Child question?", "B"))
+                        )
+                    )
+                )
+            )
+        )
+
+        val session = TestGenerator.generate(
+            paper = nestedPaper,
+            selectedCategoryIds = setOf("science"),
+            requestedCounts = mapOf("science" to 2),
+            random = Random(11)
+        )
+
+        assertEquals(2, session.questions.size)
+        assertEquals(
+            setOf("s1", "p1"),
+            session.questions.map { it.questionId }.toSet()
+        )
+        assertEquals(
+            setOf("Science", "Science / Physics"),
+            session.questions.map { it.categoryName }.toSet()
+        )
+    }
+
     private fun expectFailure(block: () -> Unit) {
         try {
             block()

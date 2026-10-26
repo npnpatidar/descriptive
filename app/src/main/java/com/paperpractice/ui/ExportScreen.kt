@@ -151,7 +151,7 @@ fun ExportScreen(
                 )
                 Spacer(Modifier.height(3.dp))
                 Text(
-                    "${categoryCountLabel(paper.categories.size)}  \u00b7  " +
+                    "${categoryCountLabel(paper.categoryCount)}  \u00b7  " +
                         questionCountLabel(paper.questionCount),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

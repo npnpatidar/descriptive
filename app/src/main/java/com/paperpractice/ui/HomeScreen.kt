@@ -33,6 +33,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -45,6 +47,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,16 +60,19 @@ import com.paperpractice.data.PaperSummary
 import com.paperpractice.ui.util.categoryCountLabel
 import com.paperpractice.ui.util.formatImportedAt
 import com.paperpractice.ui.util.questionCountLabel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     viewModel: MainViewModel,
-    onOpenPaper: (String) -> Unit
+    onOpenPaper: (String) -> Unit,
+    onOpenQuestions: (String) -> Unit
 ) {
     val papers by viewModel.papers.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var paperToDelete by remember { mutableStateOf<PaperSummary?>(null) }
+    var showCreatePaper by remember { mutableStateOf(false) }
 
     val openDocumentContract = remember { ActivityResultContracts.OpenDocument() }
     val importLauncher = rememberLauncherForActivityResult(
@@ -90,6 +97,14 @@ fun HomeScreen(
                             "Import, practise, and export",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showCreatePaper = true }) {
+                        Icon(
+                            Icons.Outlined.Add,
+                            contentDescription = "Create a new paper"
                         )
                     }
                 }
@@ -134,7 +149,8 @@ fun HomeScreen(
                         if (!viewModel.isImporting) {
                             importLauncher.launch(arrayOf("*/*"))
                         }
-                    }
+                    },
+                    onCreatePaper = { showCreatePaper = true }
                 )
             } else {
                 LazyColumn(
@@ -227,6 +243,87 @@ fun HomeScreen(
             }
         )
     }
+
+    if (showCreatePaper) {
+        CreatePaperDialog(
+            viewModel = viewModel,
+            onDismiss = { showCreatePaper = false },
+            onCreated = { paperId ->
+                showCreatePaper = false
+                onOpenQuestions(paperId)
+            }
+        )
+    }
+}
+
+@Composable
+private fun CreatePaperDialog(
+    viewModel: MainViewModel,
+    onDismiss: () -> Unit,
+    onCreated: (String) -> Unit
+) {
+    var name by rememberSaveable { mutableStateOf("") }
+    var saving by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    AlertDialog(
+        onDismissRequest = { if (!saving) onDismiss() },
+        title = { Text("New paper") },
+        text = {
+            Column {
+                Text(
+                    "Give the paper a name. You can add categories and questions next.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(14.dp))
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = {
+                        name = it
+                        error = null
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Paper name") },
+                    singleLine = true,
+                    enabled = !saving,
+                    isError = error != null,
+                    supportingText = error?.let { message -> { Text(message) } }
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = name.isNotBlank() && !saving,
+                onClick = {
+                    saving = true
+                    error = null
+                    scope.launch {
+                        when (val result = viewModel.createPaper(name)) {
+                            is CreatePaperResult.Success -> onCreated(result.paperId)
+                            is CreatePaperResult.Failure -> {
+                                error = result.message
+                                saving = false
+                            }
+                        }
+                    }
+                }
+            ) {
+                if (saving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text("Create")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !saving) { Text("Cancel") }
+        }
+    )
 }
 
 @Composable
@@ -299,7 +396,7 @@ private fun PaperCard(
 }
 
 @Composable
-private fun EmptyHome(onImport: () -> Unit) {
+private fun EmptyHome(onImport: () -> Unit, onCreatePaper: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -329,17 +426,23 @@ private fun EmptyHome(onImport: () -> Unit) {
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Import a JSON paper to choose categories, build a randomised test, " +
-                    "and export it as HTML, DOCX, PDF, or JSON.",
+                "Import a JSON paper, or create one from scratch and add your own " +
+                    "categories and questions.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 8.dp)
             )
             Spacer(Modifier.height(24.dp))
             Button(onClick = onImport) {
-                Icon(Icons.Outlined.Add, contentDescription = null)
+                Icon(Icons.Outlined.FolderOpen, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("Import a JSON paper")
+            }
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(onClick = onCreatePaper) {
+                Icon(Icons.Outlined.Add, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Create a paper")
             }
             Spacer(Modifier.height(14.dp))
             Text(

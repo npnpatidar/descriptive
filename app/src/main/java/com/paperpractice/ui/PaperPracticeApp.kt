@@ -11,10 +11,12 @@ import androidx.navigation.navArgument
 private object Routes {
     const val HOME = "home"
     const val CONFIG = "configure/{paperId}"
+    const val QUESTIONS = "questions/{paperId}"
     const val PRACTICE = "practice"
     const val EXPORT = "export"
 
     fun configure(paperId: String): String = "configure/${Uri.encode(paperId)}"
+    fun questions(paperId: String): String = "questions/${Uri.encode(paperId)}"
 }
 
 @Composable
@@ -30,6 +32,11 @@ fun PaperPracticeApp(viewModel: MainViewModel) {
                 viewModel = viewModel,
                 onOpenPaper = { paperId ->
                     navController.navigate(Routes.configure(paperId)) {
+                        launchSingleTop = true
+                    }
+                },
+                onOpenQuestions = { paperId ->
+                    navController.navigate(Routes.questions(paperId)) {
                         launchSingleTop = true
                     }
                 }
@@ -56,7 +63,26 @@ fun PaperPracticeApp(viewModel: MainViewModel) {
                     navController.navigate(Routes.EXPORT) {
                         launchSingleTop = true
                     }
+                },
+                onEditQuestions = {
+                    navController.navigate(Routes.questions(paperId)) {
+                        launchSingleTop = true
+                    }
                 }
+            )
+        }
+
+        composable(
+            route = Routes.QUESTIONS,
+            arguments = listOf(
+                navArgument("paperId") { type = NavType.StringType }
+            )
+        ) { entry ->
+            val paperId = entry.arguments?.getString("paperId").orEmpty()
+            QuestionsScreen(
+                viewModel = viewModel,
+                paperId = paperId,
+                onBack = { navController.popBackStack() }
             )
         }
 

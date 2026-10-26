@@ -11,13 +11,44 @@ object HtmlExporter {
     fun build(content: PaperContent, includeAnswers: Boolean): String {
         val answerCount = content.questionCount
         val totalLabel = if (answerCount == 1) "1 question" else "$answerCount questions"
-        val categoryLabel = if (content.categories.size == 1) {
+        val categoryCount = content.categoryCount
+        val categoryLabel = if (categoryCount == 1) {
             "1 category"
         } else {
-            "${content.categories.size} categories"
+            "$categoryCount categories"
         }
 
         return buildString {
+            var number = 1
+
+            fun appendCategory(category: com.paperpractice.domain.CategoryContent, depth: Int) {
+                appendLine("<section class=\"category\">")
+                val headingLevel = (depth + 2).coerceAtMost(6)
+                appendLine("<h$headingLevel>${escape(category.categoryName)}</h$headingLevel>")
+                category.questions.forEach { question ->
+                    appendLine("<article class=\"question\">")
+                    appendLine("<div class=\"question-heading\">")
+                    appendLine("<span class=\"number\">$number</span>")
+                    appendLine("<div class=\"question-text\">${escape(question.questionText)}</div>")
+                    appendLine("</div>")
+                    if (includeAnswers) {
+                        appendLine("<div class=\"answer\" hidden>")
+                        appendLine("<span class=\"answer-label\">Answer</span>")
+                        val answer = if (question.answerText.isEmpty()) {
+                            "<span class=\"empty-answer\">(No answer provided)</span>"
+                        } else {
+                            escape(question.answerText)
+                        }
+                        appendLine("<div class=\"answer-text\">$answer</div>")
+                        appendLine("</div>")
+                    }
+                    appendLine("</article>")
+                    number++
+                }
+                category.categories.forEach { child -> appendCategory(child, depth + 1) }
+                appendLine("</section>")
+            }
+
             appendLine("<!DOCTYPE html>")
             appendLine("<html lang=\"en\">")
             appendLine("<head>")
@@ -42,32 +73,7 @@ object HtmlExporter {
             appendLine("</header>")
             appendLine("<main id=\"question-list\">")
 
-            var number = 1
-            content.categories.forEach { category ->
-                appendLine("<section class=\"category\">")
-                appendLine("<h2>${escape(category.categoryName)}</h2>")
-                category.questions.forEach { question ->
-                    appendLine("<article class=\"question\">")
-                    appendLine("<div class=\"question-heading\">")
-                    appendLine("<span class=\"number\">$number</span>")
-                    appendLine("<div class=\"question-text\">${escape(question.questionText)}</div>")
-                    appendLine("</div>")
-                    if (includeAnswers) {
-                        appendLine("<div class=\"answer\" hidden>")
-                        appendLine("<span class=\"answer-label\">Answer</span>")
-                        val answer = if (question.answerText.isEmpty()) {
-                            "<span class=\"empty-answer\">(No answer provided)</span>"
-                        } else {
-                            escape(question.answerText)
-                        }
-                        appendLine("<div class=\"answer-text\">$answer</div>")
-                        appendLine("</div>")
-                    }
-                    appendLine("</article>")
-                    number++
-                }
-                appendLine("</section>")
-            }
+            content.categories.forEach { category -> appendCategory(category, 0) }
 
             appendLine("</main>")
             appendLine("<footer>Generated offline by Paper Practice.</footer>")
@@ -152,11 +158,16 @@ object HtmlExporter {
         button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
         @media (prefers-color-scheme: dark) { button { color: #14161d; } }
         .category { margin: 2rem 0 0; }
+        .category .category { margin: 1.1rem 0 0 1.1rem; }
         .category h2 {
           margin: 0 0 .85rem;
           padding-bottom: .45rem;
           border-bottom: 2px solid var(--line);
           font-size: 1.25rem;
+        }
+        .category h3, .category h4, .category h5, .category h6 {
+          margin: 0 0 .65rem;
+          font-size: 1.05rem;
         }
         .question {
           margin: 0 0 .9rem;

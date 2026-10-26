@@ -154,6 +154,98 @@ class ExportersTest {
     }
 
     @Test
+    fun nestedCategoriesRoundTripThroughJsonAndKeepRenderedHierarchy() {
+        val nested = PaperContent(
+            paperName = "Nested",
+            categories = listOf(
+                CategoryContent(
+                    categoryName = "Science",
+                    questions = emptyList(),
+                    categories = listOf(
+                        CategoryContent(
+                            categoryName = "Physics",
+                            questions = listOf(QuestionContent("What is force?", "F = ma"))
+                        )
+                    )
+                )
+            )
+        )
+
+        val reparsed = PaperJsonParser.parse(JsonExporter.build(nested, includeAnswers = true))
+        assertEquals(nested, reparsed)
+        assertEquals(2, reparsed.categoryCount)
+        assertEquals(1, reparsed.questionCount)
+
+        val html = HtmlExporter.build(nested, includeAnswers = true)
+        assertTrue(html.contains("<h2>Science</h2>"))
+        assertTrue(html.contains("<h3>Physics</h3>"))
+    }
+
+    @Test
+    fun selectedNestedCategoryKeepsAncestorPath() {
+        val paper = PaperDetail(
+            id = "p",
+            name = "Nested",
+            categories = listOf(
+                CategoryDetail(
+                    id = "science",
+                    name = "Science",
+                    questions = emptyList(),
+                    children = listOf(
+                        CategoryDetail(
+                            id = "physics",
+                            name = "Physics",
+                            questions = listOf(QuestionDetail("q1", "Q1", "A1"))
+                        )
+                    )
+                )
+            )
+        )
+
+        val export = ExportContentBuilder.selectedCategories(paper, setOf("physics"))
+        val parent = export.categories.single()
+
+        assertEquals("Science", parent.categoryName)
+        assertTrue(parent.questions.isEmpty())
+        assertEquals("Physics", parent.categories.single().categoryName)
+        assertEquals("Q1", parent.categories.single().questions.single().questionText)
+    }
+
+    @Test
+    fun selectingParentCategoryExportsItsQuestionsAndSubcategoryQuestions() {
+        val paper = PaperDetail(
+            id = "p",
+            name = "Nested",
+            categories = listOf(
+                CategoryDetail(
+                    id = "science",
+                    name = "Science",
+                    questions = listOf(QuestionDetail("q1", "Parent Q", "A1")),
+                    children = listOf(
+                        CategoryDetail(
+                            id = "physics",
+                            name = "Physics",
+                            questions = listOf(QuestionDetail("q2", "Child Q", "A2"))
+                        )
+                    )
+                )
+            )
+        )
+
+        val export = ExportContentBuilder.selectedCategories(paper, setOf("science"))
+        val science = export.categories.single()
+
+        assertEquals("Science", science.categoryName)
+        assertEquals(listOf("Parent Q"), science.questions.map { it.questionText })
+        assertEquals("Physics", science.categories.single().categoryName)
+        assertEquals(
+            listOf("Child Q"),
+            science.categories.single().questions.map { it.questionText }
+        )
+        assertEquals(2, export.questionCount)
+    }
+
+    @Test
     fun removingAnswersKeepsCategoriesAndQuestions() {
         val stripped = ExportContentBuilder.withoutAnswers(content)
 

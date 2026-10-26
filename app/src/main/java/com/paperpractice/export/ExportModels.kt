@@ -1,5 +1,6 @@
 package com.paperpractice.export
 
+import com.paperpractice.data.CategoryDetail
 import com.paperpractice.data.PaperDetail
 import com.paperpractice.domain.CategoryContent
 import com.paperpractice.domain.PaperContent
@@ -71,58 +72,89 @@ object ExportContentBuilder {
 
     fun entirePaper(paper: PaperDetail): PaperContent = PaperContent(
         paperName = paper.name,
-        categories = paper.categories.map { category ->
-            CategoryContent(
-                categoryName = category.name,
-                questions = category.questions.map {
-                    QuestionContent(it.questionText, it.answerText)
-                }
-            )
-        }
+        categories = paper.categories.map(::categoryContent)
     )
 
     fun selectedCategories(paper: PaperDetail, selectedCategoryIds: Set<String>): PaperContent =
         PaperContent(
             paperName = paper.name,
-            categories = paper.categories
-                .filter { it.id in selectedCategoryIds }
-                .map { category ->
-                    CategoryContent(
-                        categoryName = category.name,
-                        questions = category.questions.map {
-                            QuestionContent(it.questionText, it.answerText)
-                        }
-                    )
-                }
+            categories = paper.categories.mapNotNull { category ->
+                selectedCategoryContent(category, selectedCategoryIds)
+            }
         )
 
     fun currentTest(paper: PaperDetail, session: TestSession): PaperContent {
-        // Keep the random order that the learner saw. LinkedHashMap preserves
-        // category first-appearance order.
-        val byCategory = linkedMapOf<String, Pair<String, MutableList<QuestionContent>>>()
+        // Keep the random order that the learner saw, while rebuilding the
+        // nested category path for every question.
+        val roots = linkedMapOf<String, ExportNode>()
+
         session.questions.forEach { question ->
-            val entry = byCategory.getOrPut(question.categoryId) {
-                question.categoryName to mutableListOf()
+            val path = question.categoryPath.ifEmpty { listOf(question.categoryName) }
+            var children: MutableMap<String, ExportNode> = roots
+            var node: ExportNode? = null
+
+            path.forEach { categoryName ->
+                node = children.getOrPut(categoryName) { ExportNode(categoryName) }
+                children = node!!.children
             }
-            entry.second += QuestionContent(question.questionText, question.answerText)
+
+            node?.questions?.add(QuestionContent(question.questionText, question.answerText))
         }
 
         return PaperContent(
             paperName = paper.name,
-            categories = byCategory.map { (_, entry) ->
-                CategoryContent(
-                    categoryName = entry.first,
-                    questions = entry.second
-                )
-            }
+            categories = roots.values.map { it.toContent() }
         )
     }
 
     fun withoutAnswers(content: PaperContent): PaperContent = content.copy(
-        categories = content.categories.map { category ->
-            category.copy(
-                questions = category.questions.map { it.copy(answerText = "") }
-            )
-        }
+        categories = content.categories.map { it.withoutAnswers() }
     )
+
+    private fun categoryContent(category: CategoryDetail): CategoryContent = CategoryContent(
+        categoryName = category.name,
+        questions = category.questions.map {
+            QuestionContent(it.questionText, it.answerText)
+        },
+        categories = category.children.map(::categoryContent)
+    )
+
+    private fun selectedCategoryContent(
+        category: CategoryDetail,
+        selectedCategoryIds: Set<String>
+    ): CategoryContent? {
+        if (category.id in selectedCategoryIds) {
+            // Selecting a category means its whole subtree, matching the test
+            // configuration screen's available question count.
+            return categoryContent(category)
+        }
+
+        val children = category.children.mapNotNull {
+            selectedCategoryContent(it, selectedCategoryIds)
+        }
+        if (children.isEmpty()) return null
+
+        return CategoryContent(
+            categoryName = category.name,
+            questions = emptyList(),
+            categories = children
+        )
+    }
+
+    private fun CategoryContent.withoutAnswers(): CategoryContent = copy(
+        questions = questions.map { it.copy(answerText = "") },
+        categories = categories.map { it.withoutAnswers() }
+    )
+
+    private data class ExportNode(
+        val name: String,
+        val questions: MutableList<QuestionContent> = mutableListOf(),
+        val children: MutableMap<String, ExportNode> = linkedMapOf()
+    ) {
+        fun toContent(): CategoryContent = CategoryContent(
+            categoryName = name,
+            questions = questions.toList(),
+            categories = children.values.map { it.toContent() }
+        )
+    }
 }

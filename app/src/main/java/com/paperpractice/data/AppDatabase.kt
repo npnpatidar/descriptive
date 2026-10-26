@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [PaperEntity::class, CategoryEntity::class, QuestionEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -24,7 +24,13 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "papers.db"
-                ).build().also { instance = it }
+                )
+                    // The app has not been published yet. Recreating the local
+                    // database is preferable to carrying migration code for
+                    // development-only schemas.
+                    .fallbackToDestructiveMigration(true)
+                    .build()
+                    .also { instance = it }
             }
         }
     }

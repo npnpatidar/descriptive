@@ -51,6 +51,78 @@ class PaperJsonParserTest {
     }
 
     @Test
+    fun parsesRecursiveSubcategories() {
+        val json = """
+            {
+              "paperName": "Nested",
+              "categories": [
+                {
+                  "categoryName": "Science",
+                  "questions": [],
+                  "categories": [
+                    {
+                      "categoryName": "Physics",
+                      "questions": [
+                        {"questionText": "What is force?", "answerText": "Mass times acceleration."}
+                      ],
+                      "categories": [
+                        {
+                          "categoryName": "Mechanics",
+                          "questions": [
+                            {"questionText": "State inertia.", "answerText": ""}
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val paper = PaperJsonParser.parse(json)
+        val science = paper.categories.single()
+        val physics = science.categories.single()
+        val mechanics = physics.categories.single()
+
+        assertEquals("Science", science.categoryName)
+        assertTrue(science.questions.isEmpty())
+        assertEquals("Physics", physics.categoryName)
+        assertEquals("What is force?", physics.questions.single().questionText)
+        assertEquals("Mechanics", mechanics.categoryName)
+        assertEquals(3, paper.categoryCount)
+        assertEquals(2, paper.questionCount)
+    }
+
+    @Test
+    fun pointsAtNestedQuestionFieldWithFullPath() {
+        val message = failureMessage(
+            """
+            {
+              "paperName": "P",
+              "categories": [
+                {
+                  "categoryName": "Parent",
+                  "questions": [],
+                  "categories": [
+                    {
+                      "categoryName": "Child",
+                      "questions": [
+                        {"questionText": "Q"}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+        assertTrue(
+            message.contains("categories[0].categories[0].questions[0].answerText")
+        )
+    }
+
+    @Test
     fun acceptsUtf8Bom() {
         val paper = PaperJsonParser.parse(
             "\uFEFF{\"paperName\":\"P\",\"categories\":[]}"

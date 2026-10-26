@@ -20,15 +20,22 @@ data class PaperEntity(
             parentColumns = ["id"],
             childColumns = ["paperId"],
             onDelete = ForeignKey.CASCADE
+        ),
+        ForeignKey(
+            entity = CategoryEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["parentId"],
+            onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index("paperId")]
+    indices = [Index("paperId"), Index("parentId")]
 )
 data class CategoryEntity(
     @PrimaryKey val id: String,
     val paperId: String,
     val name: String,
-    val position: Int
+    val position: Int,
+    val parentId: String? = null
 )
 
 @Entity(

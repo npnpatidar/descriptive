@@ -28,8 +28,33 @@ abstract class PaperDao {
     @Query("SELECT * FROM papers WHERE id = :paperId")
     abstract suspend fun findPaper(paperId: String): PaperEntity?
 
-    @Query("SELECT * FROM categories WHERE paperId = :paperId ORDER BY position ASC")
+    @Query("UPDATE papers SET name = :name WHERE id = :paperId")
+    abstract suspend fun updatePaperName(paperId: String, name: String): Int
+
+    @Query("SELECT * FROM categories WHERE paperId = :paperId ORDER BY position ASC, id ASC")
     abstract suspend fun findCategories(paperId: String): List<CategoryEntity>
+
+    @Query("SELECT * FROM categories WHERE id = :categoryId")
+    abstract suspend fun findCategory(categoryId: String): CategoryEntity?
+
+    @Insert
+    abstract suspend fun insertCategory(category: CategoryEntity)
+
+    @Query("UPDATE categories SET name = :name WHERE id = :categoryId")
+    abstract suspend fun updateCategoryName(categoryId: String, name: String): Int
+
+    @Query("DELETE FROM categories WHERE id = :categoryId")
+    abstract suspend fun deleteCategory(categoryId: String): Int
+
+    @Query(
+        """
+        SELECT COALESCE(MAX(position), -1) + 1
+          FROM categories
+         WHERE paperId = :paperId
+           AND ((:parentId IS NULL AND parentId IS NULL) OR parentId = :parentId)
+        """
+    )
+    abstract suspend fun nextCategoryPosition(paperId: String, parentId: String?): Int
 
     @Query(
         """
@@ -50,6 +75,35 @@ abstract class PaperDao {
 
     @Insert
     abstract suspend fun insertQuestions(questions: List<QuestionEntity>)
+
+    @Insert
+    abstract suspend fun insertQuestion(question: QuestionEntity)
+
+    @Query(
+        """
+        UPDATE questions
+           SET questionText = :questionText,
+               answerText = :answerText
+         WHERE id = :questionId
+        """
+    )
+    abstract suspend fun updateQuestion(
+        questionId: String,
+        questionText: String,
+        answerText: String
+    ): Int
+
+    @Query("DELETE FROM questions WHERE id = :questionId")
+    abstract suspend fun deleteQuestion(questionId: String): Int
+
+    @Query(
+        """
+        SELECT COALESCE(MAX(position), -1) + 1
+          FROM questions
+         WHERE categoryId = :categoryId
+        """
+    )
+    abstract suspend fun nextQuestionPosition(categoryId: String): Int
 
     @Query("DELETE FROM papers WHERE id = :paperId")
     abstract suspend fun deletePaper(paperId: String)

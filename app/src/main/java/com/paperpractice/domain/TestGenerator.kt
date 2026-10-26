@@ -19,7 +19,8 @@ data class SessionQuestion(
     val categoryId: String,
     val categoryName: String,
     val questionText: String,
-    val answerText: String
+    val answerText: String,
+    val categoryPath: List<String> = emptyList()
 )
 
 /**
@@ -37,39 +38,51 @@ object TestGenerator {
     ): TestSession {
         require(selectedCategoryIds.isNotEmpty()) { "Select at least one category." }
 
-        val selectedCategories = paper.categories.filter { it.id in selectedCategoryIds }
+        val allCategories = paper.flattenCategories()
+        val categoriesById = allCategories.associateBy { it.category.id }
+        val selectedCategories = selectedCategoryIds.mapNotNull { categoriesById[it] }
         require(selectedCategories.isNotEmpty()) { "Select at least one category." }
 
-        selectedCategories.forEach { category ->
-            val requested = requestedCounts[category.id] ?: 0
+        selectedCategories.forEach { node ->
+            val available = allCategories
+                .filter { node.contains(it) }
+                .sumOf { it.category.questions.size }
+            val requested = requestedCounts[node.category.id] ?: 0
             require(requested >= 0) {
-                "The question count for \"${category.name}\" cannot be negative."
+                "The question count for \"${node.displayName}\" cannot be negative."
             }
-            require(requested <= category.questions.size) {
-                "The question count for \"${category.name}\" exceeds the " +
-                    "${category.questions.size} available questions."
+            require(requested <= available) {
+                "The question count for \"${node.displayName}\" exceeds the " +
+                    "$available available questions."
             }
         }
 
         val selectedQuestions = mutableListOf<SessionQuestion>()
         val usedQuestionIds = mutableSetOf<String>()
 
-        selectedCategories.forEach { category ->
-            val requested = requestedCounts[category.id] ?: 0
+        selectedCategories.forEach { node ->
+            val requested = requestedCounts[node.category.id] ?: 0
             if (requested == 0) return@forEach
 
-            category.questions
+            val pool = allCategories
+                .filter { node.contains(it) }
+                .flatMap { owner ->
+                    owner.category.questions.map { question -> owner to question }
+                }
+
+            pool
                 .shuffled(random)
-                .filter { usedQuestionIds.add(it.id) }
+                .filter { (_, question) -> usedQuestionIds.add(question.id) }
                 .take(requested)
-                .forEach { question ->
+                .forEach { (owner, question) ->
                     selectedQuestions += SessionQuestion(
                         number = selectedQuestions.size + 1,
                         questionId = question.id,
-                        categoryId = category.id,
-                        categoryName = category.name,
+                        categoryId = owner.category.id,
+                        categoryName = owner.displayName,
                         questionText = question.questionText,
-                        answerText = question.answerText
+                        answerText = question.answerText,
+                        categoryPath = owner.path
                     )
                 }
         }

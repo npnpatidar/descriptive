@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
+import com.paperpractice.domain.CategoryContent
 import com.paperpractice.domain.PaperContent
 import java.io.OutputStream
 
@@ -25,8 +26,9 @@ object PdfExporter {
                 writer.drawBody("This paper contains no categories.", spacingAfter = 12f)
             }
             var number = 1
-            content.categories.forEach { category ->
-                writer.drawCategory(category.categoryName)
+
+            fun appendCategory(category: CategoryContent, depth: Int) {
+                writer.drawCategory(category.categoryName, depth)
                 category.questions.forEach { question ->
                     writer.drawQuestion(number, question.questionText, includeAnswers)
                     if (includeAnswers) {
@@ -35,7 +37,10 @@ object PdfExporter {
                     }
                     number++
                 }
+                category.categories.forEach { child -> appendCategory(child, depth + 1) }
             }
+
+            content.categories.forEach { category -> appendCategory(category, 0) }
             writer.finish()
             document.writeTo(output)
         } finally {
@@ -104,8 +109,8 @@ object PdfExporter {
             val total = if (content.questionCount == 1) "1 question" else {
                 "${content.questionCount} questions"
             }
-            val categories = if (content.categories.size == 1) "1 category" else {
-                "${content.categories.size} categories"
+            val categories = if (content.categoryCount == 1) "1 category" else {
+                "${content.categoryCount} categories"
             }
             drawBlock(
                 text = "$categories  \u00b7  $total",
@@ -118,13 +123,14 @@ object PdfExporter {
             y += 14f
         }
 
-        fun drawCategory(name: String) {
+        fun drawCategory(name: String, depth: Int = 0) {
             if (page != null) y += 8f
             drawBlock(
                 text = name,
                 paint = categoryPaint,
                 lineHeight = 20f,
                 spacingAfter = 7f,
+                leftIndent = depth * 14f,
                 requiredSpaceAfter = 46f
             )
         }

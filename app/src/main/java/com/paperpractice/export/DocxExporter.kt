@@ -1,5 +1,6 @@
 package com.paperpractice.export
 
+import com.paperpractice.domain.CategoryContent
 import com.paperpractice.domain.PaperContent
 import java.io.OutputStream
 import java.util.zip.ZipEntry
@@ -35,10 +36,11 @@ object DocxExporter {
         val totalLabel = if (content.questionCount == 1) "1 question" else {
             "${content.questionCount} questions"
         }
-        val categoryLabel = if (content.categories.size == 1) {
+        val categoryCount = content.categoryCount
+        val categoryLabel = if (categoryCount == 1) {
             "1 category"
         } else {
-            "${content.categories.size} categories"
+            "$categoryCount categories"
         }
 
         val body = StringBuilder()
@@ -70,19 +72,21 @@ object DocxExporter {
         )
 
         var number = 1
-        content.categories.forEach { category ->
+
+        fun appendCategory(category: CategoryContent, depth: Int) {
             body.append(
                 paragraph(
                     runs = listOf(
                         Run(
                             text = category.categoryName,
                             bold = true,
-                            sizeHalfPoints = 28,
+                            sizeHalfPoints = (28 - depth * 2).coerceAtLeast(22),
                             color = "3D4D87"
                         )
                     ),
-                    spacingBefore = 320,
+                    spacingBefore = if (depth == 0) 320 else 220,
                     spacingAfter = 120,
+                    indentLeft = depth * 360,
                     keepNext = true
                 )
             )
@@ -103,7 +107,8 @@ object DocxExporter {
                                 color = "1E2433"
                             )
                         ),
-                        spacingAfter = if (includeAnswers) 100 else 220
+                        spacingAfter = if (includeAnswers) 100 else 220,
+                        indentLeft = depth * 360
                     )
                 )
 
@@ -125,13 +130,17 @@ object DocxExporter {
                                 )
                             ),
                             spacingAfter = 220,
-                            indentLeft = 360
+                            indentLeft = depth * 360 + 360
                         )
                     )
                 }
                 number++
             }
+
+            category.categories.forEach { child -> appendCategory(child, depth + 1) }
         }
+
+        content.categories.forEach { category -> appendCategory(category, 0) }
 
         body.append(
             paragraph(

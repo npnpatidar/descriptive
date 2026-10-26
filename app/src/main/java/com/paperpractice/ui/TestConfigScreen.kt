@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.AlertDialog
@@ -58,7 +59,8 @@ fun TestConfigScreen(
     paperId: String,
     onBack: () -> Unit,
     onStartTest: () -> Unit,
-    onExport: () -> Unit
+    onExport: () -> Unit,
+    onEditQuestions: () -> Unit
 ) {
     LaunchedEffect(paperId) {
         viewModel.loadPaper(paperId)
@@ -80,6 +82,12 @@ fun TestConfigScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onEditQuestions) {
+                        Icon(
+                            Icons.Outlined.Edit,
+                            contentDescription = "View and edit questions"
+                        )
+                    }
                     IconButton(onClick = onExport) {
                         Icon(
                             Icons.Outlined.FileDownload,
@@ -144,7 +152,7 @@ fun TestConfigScreen(
 
                         if (paper.categories.isEmpty()) {
                             item {
-                                EmptyCategories()
+                                EmptyCategories(onEditQuestions = onEditQuestions)
                             }
                         } else {
                             item {
@@ -153,15 +161,17 @@ fun TestConfigScreen(
                                     onClear = viewModel::clearCategorySelection
                                 )
                             }
-                            items(paper.categories, key = { it.id }) { category ->
+                            val categoryNodes = paper.flattenCategories()
+                            items(categoryNodes, key = { it.category.id }) { node ->
                                 CategoryRow(
-                                    category = category,
-                                    selected = category.id in viewModel.selectedCategoryIds,
-                                    count = viewModel.requestedCounts[category.id].orEmpty(),
-                                    error = summary.countErrors[category.id],
-                                    onToggle = { viewModel.toggleCategory(category.id) },
+                                    category = node.category,
+                                    depth = node.depth,
+                                    selected = node.category.id in viewModel.selectedCategoryIds,
+                                    count = viewModel.requestedCounts[node.category.id].orEmpty(),
+                                    error = summary.countErrors[node.category.id],
+                                    onToggle = { viewModel.toggleCategory(node.category.id) },
                                     onCountChange = {
-                                        viewModel.updateCount(category.id, it)
+                                        viewModel.updateCount(node.category.id, it)
                                     }
                                 )
                             }
@@ -199,7 +209,7 @@ private fun PaperHeader(paper: PaperDetail) {
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "${categoryCountLabel(paper.categories.size)}  \u00b7  " +
+            text = "${categoryCountLabel(paper.categoryCount)}  \u00b7  " +
                 questionCountLabel(paper.questionCount),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -207,7 +217,9 @@ private fun PaperHeader(paper: PaperDetail) {
         Spacer(Modifier.height(10.dp))
         Text(
             text = "Choose one or more categories and enter how many questions " +
-                "you want from each. Questions are picked at random every time.",
+                "you want. A category's count includes questions in all of its " +
+                "subcategories. Selecting a category replaces any ancestor or " +
+                "descendant that was already selected.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -235,17 +247,21 @@ private fun SelectionActions(onSelectAll: () -> Unit, onClear: () -> Unit) {
 @Composable
 private fun CategoryRow(
     category: CategoryDetail,
+    depth: Int,
     selected: Boolean,
     count: String,
     error: String?,
     onToggle: () -> Unit,
     onCountChange: (String) -> Unit
 ) {
-    val available = category.questions.size
+    val directQuestions = category.questions.size
+    val available = category.totalQuestionCount
     val hasQuestions = available > 0
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = (depth * 18).dp),
         colors = CardDefaults.cardColors(
             containerColor = if (selected) {
                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
@@ -276,10 +292,13 @@ private fun CategoryRow(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = if (hasQuestions) {
-                            "$available available"
-                        } else {
-                            "No questions in this category"
+                        text = when {
+                            hasQuestions && directQuestions > 0 && available > directQuestions ->
+                                "$directQuestions direct \u00b7 $available including subcategories"
+                            hasQuestions && category.children.isNotEmpty() ->
+                                "$available including subcategories"
+                            hasQuestions -> "$available available"
+                            else -> "No questions in this category"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -370,7 +389,7 @@ private fun TestSummaryBar(
 }
 
 @Composable
-private fun EmptyCategories() {
+private fun EmptyCategories(onEditQuestions: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -385,11 +404,20 @@ private fun EmptyCategories() {
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                "Re-import this paper with at least one category and question to " +
-                    "generate a test.",
+                "Add a category and at least one question before you can generate a test.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = onEditQuestions) {
+                Icon(
+                    Icons.Outlined.Edit,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("Add categories and questions")
+            }
         }
     }
 }

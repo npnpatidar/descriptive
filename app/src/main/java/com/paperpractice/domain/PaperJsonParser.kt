@@ -9,9 +9,10 @@ import kotlinx.serialization.json.JsonPrimitive
 /**
  * Parses and validates the import schema without trusting the input.
  *
- * The error messages point at the exact field (for example
- * `categories[2].questions[0].questionText`) because "invalid JSON" alone is
- * not actionable when a paper has hundreds of questions.
+ * Categories can contain subcategories recursively. Error messages point at
+ * the exact field (for example
+ * `categories[2].categories[0].questions[1].answerText`) because "invalid JSON"
+ * alone is not actionable when a paper has hundreds of questions.
  */
 object PaperJsonParser {
 
@@ -45,49 +46,75 @@ object PaperJsonParser {
             ?: throw PaperFormatException("\"categories\" must be an array.")
 
         val categories = categoriesArray.mapIndexed { categoryIndex, element ->
-            val path = "categories[$categoryIndex]"
-            val categoryObject = element as? JsonObject
-                ?: throw PaperFormatException("$path must be a JSON object.")
-
-            val categoryName = requiredString(
-                categoryObject,
-                "categoryName",
-                "$path.categoryName",
-                allowBlank = false
-            )
-
-            val questionsElement = categoryObject["questions"]
-                ?: throw PaperFormatException("$path.questions is required and must be an array.")
-            val questionsArray = questionsElement as? JsonArray
-                ?: throw PaperFormatException("$path.questions must be an array.")
-
-            val questions = questionsArray.mapIndexed { questionIndex, questionElement ->
-                val questionPath = "$path.questions[$questionIndex]"
-                val questionObject = questionElement as? JsonObject
-                    ?: throw PaperFormatException("$questionPath must be a JSON object.")
-
-                val questionText = requiredString(
-                    questionObject,
-                    "questionText",
-                    "$questionPath.questionText",
-                    allowBlank = false
-                )
-                // An empty answer is allowed: exporting with "include answers"
-                // switched off produces a valid, re-importable file.
-                val answerText = requiredString(
-                    questionObject,
-                    "answerText",
-                    "$questionPath.answerText",
-                    allowBlank = true
-                )
-
-                QuestionContent(questionText, answerText)
-            }
-
-            CategoryContent(categoryName, questions)
+            parseCategory(element, "categories[$categoryIndex]")
         }
 
         return PaperContent(paperName, categories)
+    }
+
+    private fun parseCategory(element: JsonElement, path: String): CategoryContent {
+        val categoryObject = element as? JsonObject
+            ?: throw PaperFormatException("$path must be a JSON object.")
+
+        val categoryName = requiredString(
+            categoryObject,
+            "categoryName",
+            "$path.categoryName",
+            allowBlank = false
+        )
+
+        val questionsElement = categoryObject["questions"]
+        val childrenElement = categoryObject["categories"]
+        if (questionsElement == null && childrenElement == null) {
+            throw PaperFormatException(
+                "$path.questions or $path.categories is required and must be an array."
+            )
+        }
+
+        val questionsArray = when (questionsElement) {
+            null -> emptyList()
+            is JsonArray -> questionsElement
+            else -> throw PaperFormatException("$path.questions must be an array.")
+        }
+        val questions = questionsArray.mapIndexed { questionIndex, questionElement ->
+            parseQuestion(questionElement, "$path.questions[$questionIndex]")
+        }
+
+        val childrenArray = when (childrenElement) {
+            null -> emptyList()
+            is JsonArray -> childrenElement
+            else -> throw PaperFormatException("$path.categories must be an array.")
+        }
+        val children = childrenArray.mapIndexed { childIndex, childElement ->
+            parseCategory(childElement, "$path.categories[$childIndex]")
+        }
+
+        return CategoryContent(categoryName, questions, children)
+    }
+
+    private fun parseQuestion(
+        element: JsonElement,
+        questionPath: String
+    ): QuestionContent {
+        val questionObject = element as? JsonObject
+            ?: throw PaperFormatException("$questionPath must be a JSON object.")
+
+        val questionText = requiredString(
+            questionObject,
+            "questionText",
+            "$questionPath.questionText",
+            allowBlank = false
+        )
+        // An empty answer is allowed: exporting with "include answers"
+        // switched off produces a valid, re-importable file.
+        val answerText = requiredString(
+            questionObject,
+            "answerText",
+            "$questionPath.answerText",
+            allowBlank = true
+        )
+
+        return QuestionContent(questionText, answerText)
     }
 
     private fun requiredString(

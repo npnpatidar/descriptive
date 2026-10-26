@@ -9,10 +9,17 @@ Built with Kotlin, Jetpack Compose, Room, and no network dependencies.
 
 - **Import** `.json` papers from device storage using the system file picker.
 - **Validate** the schema and point at the exact bad field, for example
-  `categories[1].questions[3].answerText is required`.
+  `categories[1].categories[0].questions[3].answerText is required`.
 - **Persist** every imported paper in a local Room database — no internet needed.
+- **Create papers from scratch**, with full editing for papers, categories, and
+  questions:
+  - add, rename, and delete papers;
+  - add, rename, and delete categories;
+  - add nested subcategories to any depth;
+  - add, edit, and delete questions, with optional answers.
 - **Configure** a test by selecting one or more categories and entering how many
-  questions to take from each, with live validation and a total count.
+  questions to take from each, with live validation and a total count. A
+  category's count includes every question in its nested subcategories.
 - **Generate** a randomized test without repeating a question.
 - **Reveal answers** all at once with Show Answers, and hide them again.
 - **Export** the current test, the selected categories, or the whole paper as:
@@ -23,26 +30,47 @@ Built with Kotlin, Jetpack Compose, Room, and no network dependencies.
   - **JSON** — valid import schema, ready to re-import.
 - Choose whether to include answers and pick the file name and save location in
   Android's document picker.
+- Nested category headings and full category paths are preserved in tests,
+  practice sessions, and exports.
 
 ## Screens
 
-1. **Home** — imported papers, import button, delete with confirmation.
-2. **Configure test** — category selection, question counts, total, export.
-3. **Practice** — randomized questions grouped by category, Show/Hide Answers.
-4. **Export** — scope, format, answer inclusion, file name, save location.
+1. **Home** — imported papers, import/create buttons, delete with confirmation.
+2. **Configure test** — category selection, question counts, total, export, and
+   a shortcut to edit questions.
+3. **Questions** — view, add, edit, and delete questions; add, rename, and delete
+   categories and nested subcategories; rename the paper. Categories are
+   collapsible and start collapsed.
+4. **Practice** — randomized questions grouped by category, Show/Hide Answers.
+5. **Export** — scope, format, answer inclusion, file name, save location.
 
 ## JSON format
+
+Categories can be nested recursively. A category may contain questions,
+subcategories, or both. Existing flat files with no `categories` array continue
+to work.
 
 ```json
 {
   "paperName": "Sample Paper",
   "categories": [
     {
-      "categoryName": "History",
+      "categoryName": "Science",
       "questions": [
         {
-          "questionText": "Explain the causes of World War I.",
-          "answerText": "The major causes included..."
+          "questionText": "State Newton's second law of motion.",
+          "answerText": "F = ma."
+        }
+      ],
+      "categories": [
+        {
+          "categoryName": "Physics",
+          "questions": [
+            {
+              "questionText": "What is inertia?",
+              "answerText": "An object's resistance to a change in motion."
+            }
+          ]
         }
       ]
     }
@@ -50,11 +78,15 @@ Built with Kotlin, Jetpack Compose, Room, and no network dependencies.
 }
 ```
 
-`paperName`, `categories`, `categoryName`, `questions`, `questionText`, and
-`answerText` are required. An answer may be an empty string (useful for
-question-only exports). Unknown extra fields are ignored.
+`paperName`, top-level `categories`, and `categoryName` are required. Each
+category must contain a `questions` array, a nested `categories` array, or both.
+An answer may be an empty string (useful for question-only exports). Unknown
+extra fields are ignored.
 
 A ready-to-import example is included: [`sample-paper.json`](sample-paper.json).
+It has five top-level sections, 23 categories nested up to four levels, and 53
+questions, including categories that hold both their own questions and
+subcategories.
 
 ## Build
 
@@ -62,7 +94,7 @@ The project builds with JDK 17, Android SDK 37, and Gradle 9.6.1. On this
 aarch64 Alpine host, use the provided toolchain wrapper:
 
 ```sh
-. /sdcard/repo/apk-build/env.sh
+. /opt/mcq-build-env.sh
 cd /sdcard/repo/descriptive
 sh gradlew :app:assembleDebug $MCQ_AAPT2_OVERRIDE --no-daemon --console=plain
 ```
@@ -82,15 +114,16 @@ Run the unit tests and lint with:
 sh gradlew :app:testDebugUnitTest :app:lintDebug $MCQ_AAPT2_OVERRIDE --no-daemon
 ```
 
-The 33 JVM tests cover JSON validation and round-tripping, randomized selection,
-answer associations, and the HTML/DOCX/JSON exporters.
+The 41 JVM tests cover JSON validation (including nested categories),
+round-tripping, randomized selection, answer associations, and the
+HTML/DOCX/PDF/JSON exporters.
 
 ## Source layout
 
 ```
 app/src/main/java/com/paperpractice/
-  data/       Room entities, DAO, repository, import models
-  domain/     JSON parser, test generator, export content builder
+  data/       Room entities, DAO, repository, paper/category tree models
+  domain/     JSON parser, test generator, import/export content
   export/     HTML, DOCX, PDF and JSON writers
   ui/         Compose screens, ViewModel, navigation, theme
 app/src/test/ Parser, generator and exporter tests

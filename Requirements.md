@@ -14,7 +14,9 @@ FR-1: Import JSON Files
 
 FR-2: JSON Data Structure
 
-Each paper contains a name and multiple categories. Each category contains questions with corresponding answers.
+Each paper contains a name and multiple categories. Categories may contain
+questions with corresponding answers and may also contain nested subcategories
+to any depth.
 
 {
       "paperName": "Sample Paper",
@@ -31,6 +33,9 @@ Each paper contains a name and multiple categories. Each category contains quest
                                                                                 ]
 }
 
+A category may also include an optional nested `categories` array using the same
+shape. Existing flat papers with only `questions` remain valid.
+
 FR-3: Paper and Category Selection
 
 - Display all imported papers.
@@ -41,13 +46,15 @@ FR-3: Paper and Category Selection
 FR-4: Configure Practice Tests
 
 - Allow users to specify the number of questions to practice from each selected category.
+- Include all questions in a category's nested subcategories when calculating
+  its available count and drawing the requested questions.
 - Validate that requested quantities are non-negative integers and do not exceed available questions.
 - Display the total number of questions that will appear in the test.
 
 FR-5: Generate Randomized Tests
 
 - Provide a Test button to generate a practice test.
-- Randomly select questions from each category according to the configured quantities.
+- Randomly select questions from each category according to the configured quantities, including questions from nested subcategories.
 - Avoid duplicate questions within a test.
 - Display all selected questions at the top of the test screen.
 - Preserve each question's category and corresponding answer.
@@ -107,6 +114,15 @@ FR-10: JSON Export and Reimport
 - Export the current test as a valid JSON paper containing the selected questions.
 - Ensure exported JSON files can be reimported without data loss.
 
+FR-11: Authoring and Editing
+
+- Allow users to create a new paper without importing JSON.
+- Allow users to add, rename, and delete categories and nested subcategories.
+- Allow users to add, edit, and delete questions and answers.
+- Deleting a category also deletes its subcategories and their questions, with
+  confirmation before destructive actions.
+- Keep the app's local data and any generated test consistent after edits.
+
 3. Non-Functional Requirements
 
 - Offline support: Core features must work without internet access.
@@ -117,16 +133,19 @@ FR-10: JSON Export and Reimport
 
 4. Main Screens
 
-1. Home Screen: List imported papers and provide an import option.
+1. Home Screen: List imported papers and provide import and create options.
 2. Test Configuration Screen: Select categories and configure question counts.
-3. Practice Screen: Display randomized questions and reveal answers.
-4. Export Screen: Select export scope, format, answer inclusion, and destination.
+3. Questions Screen: View, add, edit, and delete questions, categories, and
+   nested subcategories.
+4. Practice Screen: Display randomized questions and reveal answers.
+5. Export Screen: Select export scope, format, answer inclusion, and destination.
 
 5. Acceptance Criteria
 
 The application is complete when users can:
 
 - Import and retain valid JSON papers.
+- Create papers and manage categories, nested subcategories, and questions.
 - Select categories and configure question quantities.
 - Generate randomized tests without duplicate selections.
 - Reveal all answers on demand.
