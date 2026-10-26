@@ -1,0 +1,56 @@
+{
+  "paperName": "Sample Paper",
+  "categories": [
+    {
+      "categoryName": "History",
+      "questions": [
+        {
+          "questionText": "Explain the main causes of World War I.",
+          "answerText": "Nationalism, imperial competition, the alliance system, militarism and the assassination of Archduke Franz Ferdinand combined to turn a regional crisis into a continental war."
+        },
+        {
+          "questionText": "What was the significance of the Magna Carta?",
+          "answerText": "Signed in 1215, it limited the power of the English monarch and established that free people had rights the crown could not ignore."
+        },
+        {
+          "questionText": "Why did the Roman Empire split into eastern and western halves?",
+          "answerText": "The empire had become too large to govern efficiently from one centre. Diocletian's reforms divided administration, and after Theodosius I the two halves passed to separate rulers in 395 CE."
+        }
+      ]
+    },
+    {
+      "categoryName": "Science",
+      "questions": [
+        {
+          "questionText": "State Newton's second law of motion.",
+          "answerText": "The acceleration of an object is directly proportional to the net force acting on it and inversely proportional to its mass: F = ma."
+        },
+        {
+          "questionText": "What is photosynthesis?",
+          "answerText": "The process by which plants, algae and some bacteria use sunlight to convert carbon dioxide and water into glucose and oxygen."
+        },
+        {
+          "questionText": "What is the difference between a mixture and a compound?",
+          "answerText": "A mixture contains substances that are not chemically joined and can usually be separated by physical means. A compound is formed by a chemical reaction and its elements are present in fixed proportions."
+        }
+      ]
+    },
+    {
+      "categoryName": "General Knowledge",
+      "questions": [
+        {
+          "questionText": "Name the largest ocean on Earth.",
+          "answerText": "The Pacific Ocean."
+        },
+        {
+          "questionText": "What is the capital city of Japan?",
+          "answerText": "Tokyo."
+        },
+        {
+          "questionText": "Who wrote the play Romeo and Juliet?",
+          "answerText": "William Shakespeare."
+        }
+      ]
+    }
+  ]
+}
