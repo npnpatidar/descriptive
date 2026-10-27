@@ -185,8 +185,10 @@ A backup file wraps complete paper objects:
 
 A ready-to-import example is included:
 [`sample-paper.json`](sample-paper.json). It has five top-level sections,
-23 categories nested up to four levels, and 53 questions, including categories
-that hold both their own questions and subcategories.
+24 categories nested up to four levels, and 64 questions, including categories
+that hold both their own questions and subcategories. The sample also includes
+embedded diagram and table images, chemical and mathematical formulas,
+multi-line answers, and data-interpretation questions.
 
 ## Build
 

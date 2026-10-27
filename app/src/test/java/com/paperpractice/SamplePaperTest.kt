@@ -34,16 +34,16 @@ class SamplePaperTest {
 
         assertEquals("Comprehensive Sample Paper", paper.paperName)
         assertEquals(5, paper.categories.size)
-        assertEquals(23, paper.categoryCount)
-        assertEquals(53, paper.questionCount)
+        assertEquals(24, paper.categoryCount)
+        assertEquals(64, paper.questionCount)
         assertEquals(4, maxDepth(paper))
 
         assertEquals(
             mapOf(
-                "Science" to 16,
-                "History" to 11,
-                "Mathematics" to 8,
-                "Computer Science" to 11,
+                "Science" to 19,
+                "History" to 12,
+                "Mathematics" to 14,
+                "Computer Science" to 12,
                 "General Knowledge" to 7
             ),
             paper.categories.associate { it.categoryName to it.questionCount }
@@ -51,12 +51,16 @@ class SamplePaperTest {
 
         val questions = mutableListOf<QuestionContent>()
         collectQuestions(paper.categories, questions)
-        assertEquals(53, questions.size)
+        assertEquals(64, questions.size)
         assertTrue(questions.all { it.answerText.isNotBlank() })
         assertEquals(
             questions.size,
             questions.map { it.questionText }.toSet().size
         )
+        assertEquals(6, questions.sumOf { it.questionImages.size + it.answerImages.size })
+        assertTrue(questions.any { it.answerText.contains("->") })
+        assertTrue(questions.any { it.answerText.contains("\\frac") })
+        assertTrue(questions.any { it.questionImages.isNotEmpty() })
     }
 
     private fun maxDepth(paper: PaperContent): Int {
