@@ -1,6 +1,7 @@
 package com.paperpractice.ui
 
 import android.app.Application
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -11,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.FileProvider
+import androidx.core.content.edit
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
 import androidx.exifinterface.media.ExifInterface
@@ -41,6 +43,7 @@ import com.paperpractice.export.HtmlExporter
 import com.paperpractice.export.JsonExporter
 import com.paperpractice.export.PaperBackup
 import com.paperpractice.export.PdfExporter
+import com.paperpractice.ui.theme.ThemeMode
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -107,9 +110,16 @@ data class ContentFocus(
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = PaperRepository(AppDatabase.getInstance(application))
+    private val appearancePreferences =
+        application.getSharedPreferences("appearance", Context.MODE_PRIVATE)
 
     val papers: StateFlow<List<PaperSummary>> = repository.observePapers()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    var themeMode by mutableStateOf(
+        ThemeMode.fromStoredValue(appearancePreferences.getString("theme_mode", null))
+    )
+        private set
 
     var selectedPaper by mutableStateOf<PaperDetail?>(null)
         private set
@@ -171,6 +181,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var pendingBackup: PendingBackup? = null
     private var searchJob: Job? = null
     private var searchGeneration = 0
+
+    fun updateThemeMode(mode: ThemeMode) {
+        if (mode == themeMode) return
+        themeMode = mode
+        appearancePreferences.edit { putString("theme_mode", mode.name) }
+    }
 
     // ---------------------------------------------------------------------
     // Home / import

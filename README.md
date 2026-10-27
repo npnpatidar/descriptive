@@ -22,6 +22,7 @@ and answers are stored locally on your device.
   and tables.
 - HTML, DOCX, PDF, and re-importable JSON exports.
 - One-file backup and restore, with clear choices when a paper already exists.
+- Light and dark themes that can follow your device setting or stay fixed.
 - A ready-to-use sample paper included in the app.
 
 ## Contents
@@ -107,6 +108,8 @@ The Home screen lists every paper on the device.
   and questions.
 - **Import JSON** with the floating action button at the bottom.
 - **Search everything** with the search button in the top bar.
+- **Choose a theme** from the three-dot menu: **System default**, **Light**, or
+  **Dark**. The choice is remembered on the device.
 - **Back up all papers** or **Restore backup or paper** from the three-dot menu.
 - **Load sample paper** from the list header, or from the empty-state buttons.
 - Each paper card shows its category count, question count, and when it was

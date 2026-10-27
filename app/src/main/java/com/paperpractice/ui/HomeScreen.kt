@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
@@ -43,6 +45,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -60,6 +63,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,6 +72,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.paperpractice.data.ImportMode
 import com.paperpractice.data.PaperSummary
+import com.paperpractice.ui.theme.ThemeMode
 import com.paperpractice.ui.util.categoryCountLabel
 import com.paperpractice.ui.util.formatImportedAt
 import com.paperpractice.ui.util.questionCountLabel
@@ -85,6 +91,7 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     var paperToDelete by remember { mutableStateOf<PaperSummary?>(null) }
     var showCreatePaper by remember { mutableStateOf(false) }
+    var showThemeDialog by remember { mutableStateOf(false) }
     var homeMenuOpen by remember { mutableStateOf(false) }
 
     val openDocumentContract = remember { ActivityResultContracts.OpenDocument() }
@@ -147,13 +154,23 @@ fun HomeScreen(
                         IconButton(onClick = { homeMenuOpen = true }) {
                             Icon(
                                 Icons.Outlined.MoreVert,
-                                contentDescription = "Backup and restore"
+                                contentDescription = "More options"
                             )
                         }
                         DropdownMenu(
                             expanded = homeMenuOpen,
                             onDismissRequest = { homeMenuOpen = false }
                         ) {
+                            DropdownMenuItem(
+                                text = { Text("Theme") },
+                                leadingIcon = {
+                                    Icon(Icons.Outlined.Palette, contentDescription = null)
+                                },
+                                onClick = {
+                                    homeMenuOpen = false
+                                    showThemeDialog = true
+                                }
+                            )
                             DropdownMenuItem(
                                 text = { Text("Back up all papers") },
                                 leadingIcon = {
@@ -412,6 +429,14 @@ fun HomeScreen(
         )
     }
 
+    if (showThemeDialog) {
+        ThemeDialog(
+            selected = viewModel.themeMode,
+            onSelect = viewModel::updateThemeMode,
+            onDismiss = { showThemeDialog = false }
+        )
+    }
+
     if (showCreatePaper) {
         CreatePaperDialog(
             viewModel = viewModel,
@@ -422,6 +447,65 @@ fun HomeScreen(
             }
         )
     }
+}
+
+@Composable
+private fun ThemeDialog(
+    selected: ThemeMode,
+    onSelect: (ThemeMode) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(Icons.Outlined.Palette, contentDescription = null)
+        },
+        title = { Text("Theme") },
+        text = {
+            Column {
+                Text(
+                    "Choose how Paper Practice looks. System default follows your " +
+                        "device's light or dark setting.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                ThemeMode.entries.forEach { mode ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .selectable(
+                                selected = selected == mode,
+                                onClick = { onSelect(mode) },
+                                role = Role.RadioButton
+                            )
+                            .padding(horizontal = 4.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = selected == mode,
+                            onClick = null
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                mode.label,
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Text(
+                                mode.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Done") }
+        }
+    )
 }
 
 @Composable

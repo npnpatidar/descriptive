@@ -7,6 +7,35 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
+enum class ThemeMode(
+    val label: String,
+    val description: String
+) {
+    SYSTEM(
+        label = "System default",
+        description = "Follow your device's light or dark setting"
+    ),
+    LIGHT(
+        label = "Light",
+        description = "Always use the light theme"
+    ),
+    DARK(
+        label = "Dark",
+        description = "Always use the dark theme"
+    );
+
+    fun resolveDarkTheme(systemInDarkTheme: Boolean): Boolean = when (this) {
+        SYSTEM -> systemInDarkTheme
+        LIGHT -> false
+        DARK -> true
+    }
+
+    companion object {
+        fun fromStoredValue(value: String?): ThemeMode =
+            entries.firstOrNull { it.name == value } ?: SYSTEM
+    }
+}
+
 private val LightColors = lightColorScheme(
     primary = Color(0xFF3D4D87),
     onPrimary = Color(0xFFFFFFFF),
