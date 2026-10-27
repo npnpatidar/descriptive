@@ -440,10 +440,33 @@ object RichText {
                     val converted = StringBuilder()
                     while (cursor < source.length) {
                         val character = source[cursor]
-                        if (!character.isLetterOrDigit()) break
-                        val mapped = mapping[character] ?: break
-                        converted.append(mapped)
-                        cursor++
+                        if (character.isLetterOrDigit()) {
+                            val mapped = mapping[character] ?: break
+                            converted.append(mapped)
+                            cursor++
+                            continue
+                        }
+                        if (marker == '^' && (character == '+' || character == '-')) {
+                            val mapped = mapping[character] ?: break
+                            val next = source.getOrNull(cursor + 1)
+                            val negativeExponent = character == '-' &&
+                                converted.isEmpty() &&
+                                next?.isDigit() == true
+                            if (negativeExponent) {
+                                // 10^-6 -> 10⁻⁶
+                                converted.append(mapped)
+                                cursor++
+                                continue
+                            }
+                            // A trailing +/- is an ion charge (H^+, Cl^-,
+                            // Fe^3+); a sign followed by another operand is
+                            // ordinary arithmetic and stays unchanged.
+                            if (next == null || !next.isLetterOrDigit()) {
+                                converted.append(mapped)
+                                cursor++
+                            }
+                        }
+                        break
                     }
                     if (converted.isNotEmpty()) {
                         result.append(converted)

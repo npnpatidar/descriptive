@@ -247,7 +247,7 @@ The signed APK is written to `app/build/outputs/apk/release/app-release.apk`.
 Keep the keystore and passwords backed up securely; without them you cannot
 publish updates for an installed release.
 
-The 73 JVM tests cover strict JSON validation, recursive categories, sample
+The 74 JVM tests cover strict JSON validation, recursive categories, sample
 paper consistency, randomized selection, answer associations, rich-text
 formatting, backups, image metadata and privacy, and every exporter. The Android
 CI workflow runs the same checks on pushes and pull requests. Pushing a `v*` tag

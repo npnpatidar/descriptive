@@ -21,6 +21,16 @@ class RichTextTest {
     }
 
     @Test
+    fun `formats ionic charges`() {
+        assertEquals("H⁺", RichText.format("H^+"))
+        assertEquals("Cl⁻", RichText.format("Cl^-"))
+        assertEquals("H₃O⁺", RichText.format("H_3O^+"))
+        assertEquals("Fe³⁺", RichText.format("Fe^3+"))
+        assertEquals("10⁻⁶ m", RichText.format("10^-6 m"))
+        assertEquals("x²+3", RichText.format("x^2+3"))
+    }
+
+    @Test
     fun `formats superscripts and braces`() {
         assertEquals("x²", RichText.format("x^2"))
         assertEquals("xⁿ⁺¹", RichText.format("x^{n+1}"))
