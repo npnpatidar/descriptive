@@ -4,6 +4,8 @@ import com.paperpractice.domain.CategoryContent
 import com.paperpractice.domain.PaperContent
 import com.paperpractice.domain.PaperJsonParser
 import com.paperpractice.domain.QuestionContent
+import com.paperpractice.domain.RichBlock
+import com.paperpractice.domain.RichText
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -35,23 +37,23 @@ class SamplePaperTest {
         assertEquals("Comprehensive Sample Paper", paper.paperName)
         assertEquals(5, paper.categories.size)
         assertEquals(24, paper.categoryCount)
-        assertEquals(64, paper.questionCount)
+        assertEquals(66, paper.questionCount)
         assertEquals(4, maxDepth(paper))
 
         assertEquals(
             mapOf(
                 "Science" to 19,
                 "History" to 12,
-                "Mathematics" to 14,
+                "Mathematics" to 15,
                 "Computer Science" to 12,
-                "General Knowledge" to 7
+                "General Knowledge" to 8
             ),
             paper.categories.associate { it.categoryName to it.questionCount }
         )
 
         val questions = mutableListOf<QuestionContent>()
         collectQuestions(paper.categories, questions)
-        assertEquals(64, questions.size)
+        assertEquals(66, questions.size)
         assertTrue(questions.all { it.answerText.isNotBlank() })
         assertEquals(
             questions.size,
@@ -61,6 +63,16 @@ class SamplePaperTest {
         assertTrue(questions.any { it.answerText.contains("->") })
         assertTrue(questions.any { it.answerText.contains("\\frac") })
         assertTrue(questions.any { it.questionImages.isNotEmpty() })
+        assertTrue(questions.any { it.answerText.contains("**") })
+        assertTrue(questions.any { it.answerText.contains("++") })
+        assertTrue(questions.any { it.answerText.contains("~~") })
+        assertTrue(questions.any { it.answerText.contains("==") })
+        assertEquals(
+            4,
+            questions.sumOf { question ->
+                RichText.parse(question.answerText).blocks.count { it is RichBlock.Table }
+            }
+        )
     }
 
     private fun maxDepth(paper: PaperContent): Int {

@@ -101,6 +101,24 @@ paper.
 - Formula and chemistry shortcuts are formatted for display and export without
   changing the stored text: `H_2O`, `C_6H_12O_6`, `x^2`, `x^{n+1}`,
   `\frac{a}{b}`, `\sqrt{x}`, `->`, `<=>`, `\alpha`, `\Delta`.
+- Inline styles use `**bold**`, `*italic*`, `++underline++`,
+  `~~strikethrough~~`, and `==highlight==`. Styles can be nested, for example
+  `**bold and *italic***`.
+- A blank line before and after a table keeps it separate from paragraphs:
+
+  ```text
+  | Material | Density |
+  | :--- | ---: |
+  | Copper | 8.96 |
+  | Water | 1.00 |
+  ```
+
+  The second row is the alignment/separator row. `:---`, `:---:` and `---:`
+  align a column left, centre and right. Use `\|` for a literal pipe inside a
+  cell.
+- Fractions are stacked in the app and in HTML, DOCX and PDF exports. Braces can
+  contain nested math, for example
+  `\frac{-b \pm \sqrt{b^2 - 4ac}}{2a}`.
 
 ## Screens
 
@@ -185,10 +203,11 @@ A backup file wraps complete paper objects:
 
 A ready-to-import example is included:
 [`sample-paper.json`](sample-paper.json). It has five top-level sections,
-24 categories nested up to four levels, and 64 questions, including categories
+24 categories nested up to four levels, and 66 questions, including categories
 that hold both their own questions and subcategories. The sample also includes
-embedded diagram and table images, chemical and mathematical formulas,
-multi-line answers, and data-interpretation questions.
+embedded diagram and table images, bordered text tables, bold/italic/underline/
+strikethrough/highlighted text, stacked mathematical fractions, chemical
+equations, multi-line answers, and data-interpretation questions.
 
 ## Build
 
@@ -228,7 +247,7 @@ The signed APK is written to `app/build/outputs/apk/release/app-release.apk`.
 Keep the keystore and passwords backed up securely; without them you cannot
 publish updates for an installed release.
 
-The 66 JVM tests cover strict JSON validation, recursive categories, sample
+The 73 JVM tests cover strict JSON validation, recursive categories, sample
 paper consistency, randomized selection, answer associations, rich-text
 formatting, backups, image metadata and privacy, and every exporter. The Android
 CI workflow runs the same checks on pushes and pull requests. Pushing a `v*` tag

@@ -86,7 +86,6 @@ import com.paperpractice.data.PaperDetail
 import com.paperpractice.data.PaperSummary
 import com.paperpractice.data.QuestionDetail
 import com.paperpractice.domain.ImageContent
-import com.paperpractice.domain.RichText
 import com.paperpractice.ui.util.categoryCountLabel
 import com.paperpractice.ui.util.decodeImageForDisplay
 import com.paperpractice.ui.util.questionCountLabel
@@ -1616,8 +1615,8 @@ private fun QuestionCard(
                     }
                 }
                 Spacer(Modifier.width(10.dp))
-                Text(
-                    text = RichText.format(question.questionText),
+                RichTextContent(
+                    text = question.questionText,
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.weight(1f)
                 )
@@ -1705,10 +1704,8 @@ private fun QuestionCard(
                         color = MaterialTheme.colorScheme.primary
                     )
                     Spacer(Modifier.height(3.dp))
-                    Text(
-                        RichText.format(
-                            question.answerText.ifBlank { "(No answer provided)" }
-                        ),
+                    RichTextContent(
+                        text = question.answerText.ifBlank { "(No answer provided)" },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )

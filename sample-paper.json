@@ -6,11 +6,11 @@
       "questions": [
         {
           "questionText": "What is photosynthesis? Include the overall chemical equation.",
-          "answerText": "Photosynthesis is the process by which plants, algae and some bacteria use light energy to convert carbon dioxide and water into glucose and oxygen.\n\nWord equation: carbon dioxide + water -> glucose + oxygen\nChemical equation: 6CO_2 + 6H_2O -> C_6H_12O_6 + 6O_2\n\nThe reaction takes place mainly in the chloroplasts and stores light energy as chemical energy."
+          "answerText": "**Photosynthesis** is the process by which plants, algae and some bacteria use *light energy* to convert carbon dioxide and water into glucose and oxygen.\n\nWord equation: carbon dioxide + water -> glucose + oxygen\nChemical equation: 6CO_2 + 6H_2O -> C_6H_12O_6 + 6O_2\n\nThe reaction takes place mainly in the ++chloroplasts++ and ==stores light energy as chemical energy==."
         },
         {
           "questionText": "Compare a mixture and a compound using examples and a table.",
-          "answerText": "A mixture contains substances that are not chemically joined and can usually be separated by physical means, for example air or salt water. A compound is formed by a chemical reaction and its elements are present in fixed proportions, for example water (H_2O) or carbon dioxide (CO_2).\n\nFeature | Mixture | Compound\nComposition | variable | fixed\nSeparation | physical methods | chemical methods\nNew substance | not formed | formed\nMelting point | range | sharp"
+          "answerText": "A **mixture** contains substances that are not chemically joined and can usually be separated by physical means, for example *air* or salt water. A **compound** is formed by a chemical reaction and its elements are present in fixed proportions, for example *water* (H_2O) or carbon dioxide (CO_2).\n\n| Feature | Mixture | Compound |\n| --- | --- | --- |\n| Composition | variable | fixed |\n| Separation | physical methods | chemical methods |\n| New substance | not formed | formed |\n| Melting point | range | sharp |"
         }
       ],
       "categories": [
@@ -92,7 +92,7 @@
           "questions": [
             {
               "questionText": "What is an atom? Describe its main subatomic particles.",
-              "answerText": "An atom is the smallest particle of an element that retains the chemical properties of that element. It has a nucleus containing protons and neutrons, surrounded by electrons.\n\nParticle | Charge | Relative mass\nProton | +1 | 1\nNeutron | 0 | 1\nElectron | -1 | 1/1836"
+              "answerText": "An **atom** is the smallest particle of an element that retains the chemical properties of that element. It has a **nucleus** containing protons and neutrons, surrounded by *electrons*.\n\n| Particle | Charge | Relative mass |\n| :--- | :---: | ---: |\n| Proton | +1 | 1 |\n| Neutron | 0 | 1 |\n| Electron | -1 | 1/1836 |"
             },
             {
               "questionText": "What is the difference between an ionic bond and a covalent bond? Give one example of each.",
@@ -129,7 +129,7 @@
             },
             {
               "questionText": "Compare photosynthesis and cellular respiration in a structured answer. Include the balanced equations.",
-              "answerText": "Photosynthesis\n- Location: chloroplasts\n- Energy: light energy is stored as chemical energy\n- Equation: 6CO_2 + 6H_2O -> C_6H_12O_6 + 6O_2\n\nCellular respiration\n- Location: cytoplasm and mitochondria\n- Energy: chemical energy is released as ATP\n- Equation: C_6H_12O_6 + 6O_2 -> 6CO_2 + 6H_2O\n\nSummary table\nProcess | Energy flow | Main gas exchange\nPhotosynthesis | stores energy | takes in CO_2, releases O_2\nRespiration | releases energy | takes in O_2, releases CO_2\n\nThe two processes are complementary: the products of one are the reactants of the other."
+              "answerText": "**Photosynthesis**\n- Location: ++chloroplasts++\n- Energy: *light energy* is stored as chemical energy\n- Equation: 6CO_2 + 6H_2O -> C_6H_12O_6 + 6O_2\n\n**Cellular respiration**\n- Location: cytoplasm and mitochondria\n- Energy: chemical energy is released as ++ATP++\n- Equation: C_6H_12O_6 + 6O_2 -> 6CO_2 + 6H_2O\n\n**Summary table**\n\n| Process | Energy flow | Main gas exchange |\n| --- | --- | --- |\n| Photosynthesis | stores energy | takes in CO_2, releases O_2 |\n| Respiration | releases energy | takes in O_2, releases CO_2 |\n\nThe two processes are complementary: ==the products of one are the reactants of the other==."
             }
           ]
         }
@@ -255,6 +255,10 @@
             {
               "questionText": "Solve the simultaneous equations 2x + y = 11 and x - y = 1.",
               "answerText": "Add the two equations to eliminate y: 3x = 12, so x = 4.\nSubstitute x = 4 into x - y = 1: 4 - y = 1, so y = 3.\nCheck: 2(4) + 3 = 11 and 4 - 3 = 1."
+            },
+            {
+              "questionText": "State the quadratic formula and use it to solve x^2 - 5x + 6 = 0.",
+              "answerText": "The **quadratic formula** is:\n\nx = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}\n\nFor x^2 - 5x + 6 = 0, a = 1, b = -5 and c = 6:\n\nx = \\frac{5 \\pm \\sqrt{25 - 24}}{2} = \\frac{5 \\pm 1}{2}\n\nSo x = 3 or x = 2. ==Check both roots in the original equation.=="
             }
           ]
         },
@@ -361,7 +365,7 @@
                 },
                 {
                   "questionText": "What is time complexity? Compare binary search and linear search.",
-                  "answerText": "Time complexity describes how the running time of an algorithm grows as the input size grows.\n\nAlgorithm | Best case | Average case\nBinary search | O(1) | O(log n)\nLinear search | O(1) | O(n)\n\nBinary search is much faster for large sorted lists, but it requires the data to be sorted first."
+                  "answerText": "**Time complexity** describes how the running time of an algorithm grows as the input size grows.\n\n| Algorithm | Best case | Average case |\n| --- | :---: | :---: |\n| Binary search | O(1) | O(log n) |\n| Linear search | O(1) | O(n) |\n\n==Binary search== is much faster for large sorted lists, but it requires the data to be sorted first."
                 },
                 {
                   "questionText": "Trace this loop and state the output.\n\nlet total = 0\nfor (let i = 1; i <= 4; i++) {\n  total += i * i\n}\nprint(total)",
@@ -434,6 +438,10 @@
             {
               "questionText": "Who wrote Pride and Prejudice?",
               "answerText": "Jane Austen."
+            },
+            {
+              "questionText": "Explain the difference between a simile and a metaphor. Use **bold**, *italic*, ++underline++, ~~strikethrough~~ and ==highlight== in your answer.",
+              "answerText": "A **simile** compares two things using *like* or *as*: ++“as brave as a lion”++.\n\nA **metaphor** says that one thing ==is== another: *“the classroom was a zoo”*.\n\n~~A simile and a metaphor are exactly the same device.~~ They are different: a simile makes the comparison explicit, while a metaphor states it directly."
             }
           ]
         }

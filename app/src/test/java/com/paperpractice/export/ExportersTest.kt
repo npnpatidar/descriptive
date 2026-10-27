@@ -47,6 +47,24 @@ class ExportersTest {
         )
     )
 
+    private val richContent = PaperContent(
+        paperName = "Rich <Text>",
+        categories = listOf(
+            CategoryContent(
+                categoryName = "Mixed",
+                questions = listOf(
+                    QuestionContent(
+                        questionText = "**Bold** and *italic*",
+                        answerText = "Use ++under++, ~~strike~~ and ==mark==.\n\n" +
+                            "| Name | Value |\n" +
+                            "| :--- | ---: |\n" +
+                            "| **x** | \\frac{1}{2} |"
+                    )
+                )
+            )
+        )
+    )
+
     @Test
     fun jsonRoundTripsThroughImportParser() {
         val json = JsonExporter.build(content, includeAnswers = true)
@@ -63,6 +81,15 @@ class ExportersTest {
         assertEquals(content.paperName, reparsed.paperName)
         assertEquals(content.questionCount, reparsed.questionCount)
         assertTrue(reparsed.categories.flatMap { it.questions }.all { it.answerText.isEmpty() })
+    }
+
+    @Test
+    fun richMarkupRoundTripsThroughJson() {
+        val json = JsonExporter.build(richContent, includeAnswers = true)
+        val reparsed = PaperJsonParser.parse(json)
+
+        assertEquals(richContent, reparsed)
+        assertTrue(reparsed.categories.flatMap { it.questions }.single().answerText.contains("**"))
     }
 
     @Test
@@ -370,6 +397,52 @@ class ExportersTest {
         assertTrue(stripped.categories.flatMap { it.questions }.all {
             it.answerText.isEmpty()
         })
+    }
+
+    @Test
+    fun htmlRendersRichStylesTablesAndFractions() {
+        val html = HtmlExporter.build(richContent, includeAnswers = true)
+
+        assertTrue(html.contains("<strong>Bold</strong>"))
+        assertTrue(html.contains("<em>italic</em>"))
+        assertTrue(html.contains("<u>under</u>"))
+        assertTrue(html.contains("<s>strike</s>"))
+        assertTrue(html.contains("<mark>mark</mark>"))
+        assertTrue(html.contains("<table class=\"content-table\">"))
+        assertTrue(html.contains("<span class=\"frac\">"))
+        assertTrue(html.contains("border: 1px solid var(--line)"))
+        assertTrue(html.contains("text-align:right"))
+    }
+
+    @Test
+    fun docxRendersRichStylesTablesAndFractions() {
+        val bytes = ByteArrayOutputStream().also {
+            DocxExporter.write(
+                richContent,
+                includeAnswers = true,
+                answersAtEnd = false,
+                output = it
+            )
+        }.toByteArray()
+
+        val document = unzip(bytes)["word/document.xml"] ?: error("document.xml missing")
+        val text = document.toString(Charsets.UTF_8)
+
+        assertTrue(text.contains("<w:tbl>"))
+        assertTrue(text.contains("<w:tblBorders>"))
+        assertTrue(text.contains("<w:insideH"))
+        assertTrue(text.contains("<w:insideV"))
+        assertTrue(text.contains("<m:f>"))
+        assertTrue(text.contains("<w:b/>"))
+        assertTrue(text.contains("<w:u w:val=\"single\"/>"))
+        assertTrue(text.contains("<w:strike/>"))
+        assertTrue(text.contains("w:fill=\"FFF0A8\""))
+
+        val factory = DocumentBuilderFactory.newInstance()
+        factory.isNamespaceAware = true
+        val parsed = factory.newDocumentBuilder()
+            .parse(ByteArrayInputStream(document))
+        assertEquals("document", parsed.documentElement.localName)
     }
 
     @Test

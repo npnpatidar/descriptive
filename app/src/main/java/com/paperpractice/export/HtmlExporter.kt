@@ -1,7 +1,11 @@
 package com.paperpractice.export
 
+import com.paperpractice.domain.ColumnAlignment
 import com.paperpractice.domain.ImageContent
 import com.paperpractice.domain.PaperContent
+import com.paperpractice.domain.RichBlock
+import com.paperpractice.domain.RichDocument
+import com.paperpractice.domain.RichInline
 import com.paperpractice.domain.RichText
 import java.util.Base64
 
@@ -42,7 +46,7 @@ object HtmlExporter {
                         appendLine("<div class=\"question-heading\">")
                         appendLine("<span class=\"number\">$number</span>")
                         appendLine(
-                            "<div class=\"question-text\">${escape(RichText.format(question.questionText))}</div>"
+                            "<div class=\"question-text\">${richHtml(question.questionText)}</div>"
                         )
                         appendLine("</div>")
                         question.questionImages.forEach { image ->
@@ -54,7 +58,7 @@ object HtmlExporter {
                             val answer = if (question.answerText.isBlank()) {
                                 "<span class=\"empty-answer\">(No answer provided)</span>"
                             } else {
-                                escape(RichText.format(question.answerText))
+                                richHtml(question.answerText)
                             }
                             appendLine("<div class=\"answer-text\">$answer</div>")
                             question.answerImages.forEach { image ->
@@ -118,6 +122,79 @@ object HtmlExporter {
         }
     }
 
+    private fun richHtml(value: String): String = renderDocument(RichText.parse(value))
+
+    private fun renderDocument(document: RichDocument): String = document.blocks.joinToString("") { block ->
+        when (block) {
+            is RichBlock.Paragraph -> {
+                "<div class=\"rich-paragraph\">${renderInlines(block.inlines)}</div>"
+            }
+
+            is RichBlock.Table -> {
+                buildString {
+                    append("<div class=\"table-wrap\"><table class=\"content-table\">")
+                    append("<thead><tr>")
+                    block.headers.forEachIndexed { index, cell ->
+                        append("<th style=\"text-align:")
+                        append(alignmentCss(block.alignments.getOrNull(index)))
+                        append("\">")
+                        append(renderInlines(cell))
+                        append("</th>")
+                    }
+                    append("</tr></thead><tbody>")
+                    block.rows.forEach { row ->
+                        append("<tr>")
+                        row.forEachIndexed { index, cell ->
+                            append("<td style=\"text-align:")
+                            append(alignmentCss(block.alignments.getOrNull(index)))
+                            append("\">")
+                            append(renderInlines(cell))
+                            append("</td>")
+                        }
+                        append("</tr>")
+                    }
+                    append("</tbody></table></div>")
+                }
+            }
+        }
+    }
+
+    private fun renderInlines(inlines: List<RichInline>): String = buildString {
+        inlines.forEach { inline ->
+            append(
+                when (inline) {
+                    is RichInline.Text -> styled(
+                        escape(inline.text).replace("\n", "<br>"),
+                        inline.style
+                    )
+
+                    is RichInline.Fraction -> {
+                        "<span class=\"frac\">" +
+                            "<span class=\"frac-num\">${renderInlines(inline.numerator)}</span>" +
+                            "<span class=\"frac-den\">${renderInlines(inline.denominator)}</span>" +
+                            "</span>"
+                    }
+                }
+            )
+        }
+    }
+
+    private fun styled(html: String, style: com.paperpractice.domain.RichInlineStyle): String {
+        var value = html
+        if (style.highlight) value = "<mark>$value</mark>"
+        if (style.strikethrough) value = "<s>$value</s>"
+        if (style.underline) value = "<u>$value</u>"
+        if (style.italic) value = "<em>$value</em>"
+        if (style.bold) value = "<strong>$value</strong>"
+        return value
+    }
+
+    private fun alignmentCss(alignment: ColumnAlignment?): String = when (alignment) {
+        ColumnAlignment.CENTER -> "center"
+        ColumnAlignment.RIGHT -> "right"
+        else -> "left"
+    }
+
     private fun imageTag(image: ImageContent, className: String): String {
         val encoded = Base64.getEncoder().encodeToString(image.bytes)
         val alt = if (className == "question-image") "Question image" else "Answer image"
@@ -148,6 +225,7 @@ object HtmlExporter {
           --accent: #3d4d87;
           --line: #ddd8ca;
           --answer-bg: #eef1fa;
+          --highlight: #fff0a8;
         }
         @media (prefers-color-scheme: dark) {
           :root {
@@ -158,6 +236,7 @@ object HtmlExporter {
             --accent: #aebcf5;
             --line: #353a48;
             --answer-bg: #252a39;
+            --highlight: #5b4b13;
           }
         }
         * { box-sizing: border-box; }
@@ -231,6 +310,47 @@ object HtmlExporter {
         @media (prefers-color-scheme: dark) { .number { color: #14161d; } }
         .question-text, .answer-text { white-space: pre-wrap; overflow-wrap: anywhere; }
         .question-text { padding-top: .2rem; }
+        .rich-paragraph { margin: .3rem 0; }
+        .rich-paragraph:first-child { margin-top: 0; }
+        .rich-paragraph:last-child { margin-bottom: 0; }
+        mark {
+          background: var(--highlight);
+          color: inherit;
+          padding: 0 .08em;
+          border-radius: .15em;
+        }
+        .frac {
+          display: inline-flex;
+          flex-direction: column;
+          align-items: center;
+          vertical-align: middle;
+          margin: 0 .18em;
+          line-height: 1.05;
+          text-align: center;
+        }
+        .frac-num {
+          border-bottom: 1.2px solid currentColor;
+          padding: 0 .18em;
+        }
+        .frac-den { padding: 0 .18em; }
+        .table-wrap { margin: .65rem 0; overflow-x: auto; }
+        .content-table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: .95em;
+          background: var(--paper);
+        }
+        .content-table th, .content-table td {
+          border: 1px solid var(--line);
+          padding: .42rem .55rem;
+          vertical-align: top;
+          overflow-wrap: anywhere;
+        }
+        .content-table th {
+          background: var(--answer-bg);
+          font-weight: 800;
+        }
+        .content-table tbody tr:nth-child(even) { background: rgba(125, 135, 160, .08); }
         .answer {
           margin: 1rem 0 0 2.85rem;
           padding: .8rem .9rem;

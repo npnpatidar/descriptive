@@ -4,10 +4,14 @@ import com.paperpractice.domain.CategoryContent
 import com.paperpractice.domain.ImageContent
 import com.paperpractice.domain.ImageMetadata
 import com.paperpractice.domain.PaperContent
+import com.paperpractice.domain.RichBlock
+import com.paperpractice.domain.RichInline
+import com.paperpractice.domain.RichInlineStyle
 import com.paperpractice.domain.RichText
 import java.io.OutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlin.math.max
 import kotlin.math.min
 
 /**
@@ -181,23 +185,20 @@ object DocxExporter {
                 )
 
                 category.questions.forEach { question ->
-                    body.append(
-                        paragraph(
-                            runs = listOf(
-                                Run(
-                                    text = "$number. ",
-                                    bold = true,
-                                    sizeHalfPoints = 23,
-                                    color = "3D4D87"
-                                ),
-                                Run(
-                                    text = RichText.format(question.questionText),
-                                    sizeHalfPoints = 23,
-                                    color = "1E2433"
-                                )
-                            ),
-                            spacingAfter = if (includeAnswers && !answersAtEnd) 100 else 220
-                        )
+                    appendRichBlocks(
+                        body = body,
+                        blocks = RichText.parse(question.questionText).blocks,
+                        prefix = listOf(
+                            Run(
+                                text = "$number. ",
+                                bold = true,
+                                sizeHalfPoints = 23,
+                                color = "3D4D87"
+                            )
+                        ),
+                        sizeHalfPoints = 23,
+                        color = "1E2433",
+                        spacingAfter = if (includeAnswers && !answersAtEnd) 100 else 220
                     )
 
                     question.questionImages.forEach { image ->
@@ -207,39 +208,35 @@ object DocxExporter {
                     }
 
                     if (includeAnswers) {
-                        val answerText = RichText.format(
+                        val blocks = RichText.parse(
                             question.answerText.ifBlank { "(No answer provided)" }
-                        )
+                        ).blocks
                         if (answersAtEnd) {
                             answers += DocxAnswerEntry(
                                 number = number,
-                                text = answerText,
+                                blocks = blocks,
                                 images = question.answerImages
                             )
                         } else {
-                            body.append(
-                                paragraph(
-                                    runs = listOf(
-                                        Run(
-                                            text = "Answer: ",
-                                            bold = true,
-                                            sizeHalfPoints = 20,
-                                            color = "646B7C"
-                                        ),
-                                        Run(
-                                            text = answerText,
-                                            sizeHalfPoints = 20,
-                                            color = "3B4152",
-                                            italic = question.answerText.isBlank()
-                                        )
-                                    ),
-                                    spacingAfter = if (question.answerImages.isEmpty()) {
-                                        220
-                                    } else {
-                                        100
-                                    },
-                                    indentLeft = 360
-                                )
+                            appendRichBlocks(
+                                body = body,
+                                blocks = blocks,
+                                prefix = listOf(
+                                    Run(
+                                        text = "Answer: ",
+                                        bold = true,
+                                        sizeHalfPoints = 20,
+                                        color = "646B7C"
+                                    )
+                                ),
+                                sizeHalfPoints = 20,
+                                color = "3B4152",
+                                spacingAfter = if (question.answerImages.isEmpty()) {
+                                    220
+                                } else {
+                                    100
+                                },
+                                indentLeft = 360
                             )
                             question.answerImages.forEach { image ->
                                 imagesById[image.id]?.let { asset ->
@@ -284,23 +281,20 @@ object DocxExporter {
                 )
             )
             answers.forEach { answer ->
-                body.append(
-                    paragraph(
-                        runs = listOf(
-                            Run(
-                                text = "${answer.number}. ",
-                                bold = true,
-                                sizeHalfPoints = 21,
-                                color = "3D4D87"
-                            ),
-                            Run(
-                                text = answer.text,
-                                sizeHalfPoints = 21,
-                                color = "1E2433"
-                            )
-                        ),
-                        spacingAfter = if (answer.images.isEmpty()) 140 else 60
-                    )
+                appendRichBlocks(
+                    body = body,
+                    blocks = answer.blocks,
+                    prefix = listOf(
+                        Run(
+                            text = "${answer.number}. ",
+                            bold = true,
+                            sizeHalfPoints = 21,
+                            color = "3D4D87"
+                        )
+                    ),
+                    sizeHalfPoints = 21,
+                    color = "1E2433",
+                    spacingAfter = if (answer.images.isEmpty()) 140 else 60
                 )
                 answer.images.forEach { image ->
                     imagesById[image.id]?.let { asset ->
@@ -326,6 +320,7 @@ object DocxExporter {
         return """
             <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
             <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                        xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"
                         xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
                         xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
                         xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
@@ -353,7 +348,7 @@ object DocxExporter {
 
     private data class DocxAnswerEntry(
         val number: Int,
-        val text: String,
+        val blocks: List<RichBlock>,
         val images: List<ImageContent>
     )
 
@@ -405,6 +400,9 @@ object DocxExporter {
         val text: String,
         val bold: Boolean = false,
         val italic: Boolean = false,
+        val underline: Boolean = false,
+        val strikethrough: Boolean = false,
+        val highlight: Boolean = false,
         val sizeHalfPoints: Int = 22,
         val color: String = "1E2433"
     )
@@ -432,18 +430,280 @@ object DocxExporter {
         append("</w:pPr>")
 
         runs.forEach { run ->
-            append("<w:r><w:rPr>")
-            append("<w:rFonts w:ascii=\"Calibri\" w:hAnsi=\"Calibri\" w:cs=\"Calibri\"/>")
-            if (run.bold) append("<w:b/>")
-            if (run.italic) append("<w:i/>")
-            append("<w:color w:val=\"${run.color}\"/>")
-            append("<w:sz w:val=\"${run.sizeHalfPoints}\"/>")
-            append("<w:szCs w:val=\"${run.sizeHalfPoints}\"/>")
-            append("</w:rPr>")
-            appendRunText(run.text)
-            append("</w:r>")
+            append(runXml(run))
         }
         append("</w:p>")
+    }
+
+    private fun runXml(run: Run): String = buildString {
+        append("<w:r><w:rPr>")
+        append("<w:rFonts w:ascii=\"Calibri\" w:hAnsi=\"Calibri\" w:cs=\"Calibri\"/>")
+        if (run.bold) append("<w:b/>")
+        if (run.italic) append("<w:i/>")
+        if (run.strikethrough) append("<w:strike/>")
+        append("<w:color w:val=\"${run.color}\"/>")
+        append("<w:sz w:val=\"${run.sizeHalfPoints}\"/>")
+        append("<w:szCs w:val=\"${run.sizeHalfPoints}\"/>")
+        if (run.underline) append("<w:u w:val=\"single\"/>")
+        if (run.highlight) {
+            append("<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"FFF0A8\"/>")
+        }
+        append("</w:rPr>")
+        appendRunText(run.text)
+        append("</w:r>")
+    }
+
+    private fun appendRichBlocks(
+        body: StringBuilder,
+        blocks: List<RichBlock>,
+        prefix: List<Run>,
+        sizeHalfPoints: Int,
+        color: String,
+        spacingAfter: Int,
+        indentLeft: Int = 0
+    ) {
+        if (blocks.isEmpty()) {
+            body.append(
+                paragraph(
+                    runs = prefix,
+                    spacingAfter = spacingAfter,
+                    indentLeft = indentLeft
+                )
+            )
+            return
+        }
+
+        var pendingPrefix = prefix
+        blocks.forEachIndexed { index, block ->
+            when (block) {
+                is RichBlock.Paragraph -> {
+                    body.append(
+                        richParagraph(
+                            inlines = block.inlines,
+                            prefix = pendingPrefix,
+                            sizeHalfPoints = sizeHalfPoints,
+                            color = color,
+                            spacingAfter = if (index == blocks.lastIndex) {
+                                spacingAfter
+                            } else {
+                                90
+                            },
+                            indentLeft = indentLeft
+                        )
+                    )
+                    pendingPrefix = emptyList()
+                }
+
+                is RichBlock.Table -> {
+                    if (pendingPrefix.isNotEmpty()) {
+                        body.append(
+                            paragraph(
+                                runs = pendingPrefix,
+                                spacingAfter = 70,
+                                indentLeft = indentLeft
+                            )
+                        )
+                        pendingPrefix = emptyList()
+                    }
+                    body.append(richTable(block, sizeHalfPoints, color))
+                    body.append(
+                        paragraph(
+                            runs = emptyList(),
+                            spacingAfter = if (index == blocks.lastIndex) spacingAfter else 80
+                        )
+                    )
+                }
+            }
+        }
+        if (pendingPrefix.isNotEmpty()) {
+            body.append(
+                paragraph(
+                    runs = pendingPrefix,
+                    spacingAfter = spacingAfter,
+                    indentLeft = indentLeft
+                )
+            )
+        }
+    }
+
+    private fun richParagraph(
+        inlines: List<RichInline>,
+        prefix: List<Run>,
+        sizeHalfPoints: Int,
+        color: String,
+        spacingAfter: Int,
+        indentLeft: Int = 0
+    ): String = buildString {
+        append("<w:p><w:pPr>")
+        append("<w:spacing w:before=\"0\" w:after=\"$spacingAfter\"/>")
+        if (indentLeft > 0) append("<w:ind w:left=\"$indentLeft\"/>")
+        append("</w:pPr>")
+        prefix.forEach { append(runXml(it)) }
+        append(inlineXml(inlines, sizeHalfPoints, color))
+        append("</w:p>")
+    }
+
+    private fun inlineXml(
+        inlines: List<RichInline>,
+        sizeHalfPoints: Int,
+        color: String
+    ): String = buildString {
+        inlines.forEach { inline ->
+            when (inline) {
+                is RichInline.Text -> {
+                    append(
+                        runXml(
+                            Run(
+                                text = inline.text,
+                                bold = inline.style.bold,
+                                italic = inline.style.italic,
+                                underline = inline.style.underline,
+                                strikethrough = inline.style.strikethrough,
+                                highlight = inline.style.highlight,
+                                sizeHalfPoints = sizeHalfPoints,
+                                color = color
+                            )
+                        )
+                    )
+                }
+
+                is RichInline.Fraction -> {
+                    append(fractionXml(inline, sizeHalfPoints, color))
+                }
+            }
+        }
+    }
+
+    private fun fractionXml(
+        fraction: RichInline.Fraction,
+        sizeHalfPoints: Int,
+        color: String
+    ): String {
+        val numerator = RichText.plain(fraction.numerator)
+        val denominator = RichText.plain(fraction.denominator)
+        return buildString {
+            append("<m:oMath><m:f><m:num>")
+            append(mathRunXml(numerator, fraction.style, sizeHalfPoints, color))
+            append("</m:num><m:den>")
+            append(mathRunXml(denominator, fraction.style, sizeHalfPoints, color))
+            append("</m:den></m:f></m:oMath>")
+        }
+    }
+
+    private fun mathRunXml(
+        text: String,
+        style: RichInlineStyle,
+        sizeHalfPoints: Int,
+        color: String
+    ): String = buildString {
+        append("<m:r><w:rPr>")
+        append("<w:rFonts w:ascii=\"Cambria Math\" w:hAnsi=\"Cambria Math\"/>")
+        if (style.bold) append("<w:b/>")
+        if (style.italic) append("<w:i/>")
+        append("<w:color w:val=\"$color\"/>")
+        append("<w:sz w:val=\"$sizeHalfPoints\"/>")
+        append("<w:szCs w:val=\"$sizeHalfPoints\"/>")
+        append("</w:rPr><m:t xml:space=\"preserve\">")
+        append(escapeXml(text))
+        append("</m:t></m:r>")
+    }
+
+    private fun richTable(
+        table: RichBlock.Table,
+        sizeHalfPoints: Int,
+        color: String
+    ): String {
+        val columnCount = max(
+            table.headers.size,
+            table.rows.maxOfOrNull { it.size } ?: 0
+        ).coerceAtLeast(1)
+        val cellWidthPercent = 5000 / columnCount
+        val gridWidth = 9638 / columnCount
+
+        return buildString {
+            append("<w:tbl><w:tblPr>")
+            append("<w:tblW w:w=\"5000\" w:type=\"pct\"/>")
+            append("<w:tblBorders>")
+            append("<w:top w:val=\"single\" w:sz=\"6\" w:space=\"0\" w:color=\"BFC5D4\"/>")
+            append("<w:left w:val=\"single\" w:sz=\"6\" w:space=\"0\" w:color=\"BFC5D4\"/>")
+            append("<w:bottom w:val=\"single\" w:sz=\"6\" w:space=\"0\" w:color=\"BFC5D4\"/>")
+            append("<w:right w:val=\"single\" w:sz=\"6\" w:space=\"0\" w:color=\"BFC5D4\"/>")
+            append("<w:insideH w:val=\"single\" w:sz=\"6\" w:space=\"0\" w:color=\"BFC5D4\"/>")
+            append("<w:insideV w:val=\"single\" w:sz=\"6\" w:space=\"0\" w:color=\"BFC5D4\"/>")
+            append("</w:tblBorders>")
+            append("<w:tblLayout w:type=\"fixed\"/>")
+            append("<w:tblCellMar>")
+            append("<w:top w:w=\"70\" w:type=\"dxa\"/>")
+            append("<w:left w:w=\"100\" w:type=\"dxa\"/>")
+            append("<w:bottom w:w=\"70\" w:type=\"dxa\"/>")
+            append("<w:right w:w=\"100\" w:type=\"dxa\"/>")
+            append("</w:tblCellMar>")
+            append("</w:tblPr>")
+            append("<w:tblGrid>")
+            repeat(columnCount) {
+                append("<w:gridCol w:w=\"$gridWidth\"/>")
+            }
+            append("</w:tblGrid>")
+
+            append(
+                tableRowXml(
+                    cells = table.headers,
+                    columnCount = columnCount,
+                    cellWidthPercent = cellWidthPercent,
+                    sizeHalfPoints = sizeHalfPoints,
+                    color = color,
+                    header = true,
+                    alternate = false
+                )
+            )
+            table.rows.forEachIndexed { index, row ->
+                append(
+                    tableRowXml(
+                        cells = row,
+                        columnCount = columnCount,
+                        cellWidthPercent = cellWidthPercent,
+                        sizeHalfPoints = sizeHalfPoints,
+                        color = color,
+                        header = false,
+                        alternate = index % 2 == 1
+                    )
+                )
+            }
+            append("</w:tbl>")
+        }
+    }
+
+    private fun tableRowXml(
+        cells: List<List<RichInline>>,
+        columnCount: Int,
+        cellWidthPercent: Int,
+        sizeHalfPoints: Int,
+        color: String,
+        header: Boolean,
+        alternate: Boolean
+    ): String = buildString {
+        append("<w:tr>")
+        if (header) append("<w:trPr><w:tblHeader/></w:trPr>")
+        repeat(columnCount) { index ->
+            val cell = cells.getOrNull(index).orEmpty()
+            append("<w:tc><w:tcPr>")
+            append("<w:tcW w:w=\"$cellWidthPercent\" w:type=\"pct\"/>")
+            when {
+                header -> append("<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"EEF1FA\"/>")
+                alternate -> append("<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"F7F8FB\"/>")
+            }
+            append("</w:tcPr>")
+            append("<w:p><w:pPr><w:spacing w:before=\"0\" w:after=\"0\"/></w:pPr>")
+            append(
+                inlineXml(
+                    inlines = cell,
+                    sizeHalfPoints = sizeHalfPoints,
+                    color = color
+                )
+            )
+            append("</w:p></w:tc>")
+        }
+        append("</w:tr>")
     }
 
     private fun StringBuilder.appendRunText(text: String) {

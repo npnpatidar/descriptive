@@ -16,7 +16,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.FileDownload
@@ -45,7 +44,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.paperpractice.domain.RichText
 import com.paperpractice.domain.SessionQuestion
 import com.paperpractice.domain.TestSession
 import com.paperpractice.ui.util.categoryCountLabel
@@ -266,12 +264,10 @@ private fun QuestionCard(question: SessionQuestion, showAnswer: Boolean) {
             Spacer(Modifier.width(12.dp))
 
             Column(modifier = Modifier.weight(1f)) {
-                SelectionContainer {
-                    Text(
-                        text = RichText.format(question.questionText),
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                }
+                RichTextContent(
+                    text = question.questionText,
+                    style = MaterialTheme.typography.bodyLarge
+                )
                 AttachedImages(
                     images = question.questionImages,
                     modifier = Modifier.padding(top = 10.dp),
@@ -295,17 +291,13 @@ private fun QuestionCard(question: SessionQuestion, showAnswer: Boolean) {
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
-                            SelectionContainer {
-                                Text(
-                                    text = RichText.format(
-                                        question.answerText.ifBlank {
-                                            "(No answer provided)"
-                                        }
-                                    ),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
+                            RichTextContent(
+                                text = question.answerText.ifBlank {
+                                    "(No answer provided)"
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
                             AttachedImages(
                                 images = question.answerImages,
                                 modifier = Modifier.padding(top = 8.dp),
