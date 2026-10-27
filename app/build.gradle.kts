@@ -5,6 +5,24 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+val releaseKeystore = System.getenv("PAPER_PRACTICE_KEYSTORE")
+val releaseKeystorePassword = System.getenv("PAPER_PRACTICE_KEYSTORE_PASSWORD")
+val releaseKeyAlias = System.getenv("PAPER_PRACTICE_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("PAPER_PRACTICE_KEY_PASSWORD")
+val releaseSigningValues = listOf(
+    releaseKeystore,
+    releaseKeystorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
+)
+val hasReleaseSigning = releaseSigningValues.all { !it.isNullOrBlank() }
+if (releaseSigningValues.any { !it.isNullOrBlank() } && !hasReleaseSigning) {
+    throw GradleException(
+        "Set all four PAPER_PRACTICE_KEYSTORE, PAPER_PRACTICE_KEYSTORE_PASSWORD, " +
+            "PAPER_PRACTICE_KEY_ALIAS, and PAPER_PRACTICE_KEY_PASSWORD variables to sign a release."
+    )
+}
+
 android {
     namespace = "com.paperpractice"
     compileSdk = 37
@@ -14,12 +32,24 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0.0"
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseKeystore!!)
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

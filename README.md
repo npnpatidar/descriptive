@@ -210,10 +210,27 @@ sh gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug \
   --no-daemon --console=plain
 ```
 
+### Release signing
+
+Release builds are signed when all four signing variables are present:
+
+```sh
+export PAPER_PRACTICE_KEYSTORE=/path/to/paper-practice-release.jks
+export PAPER_PRACTICE_KEYSTORE_PASSWORD='...'
+export PAPER_PRACTICE_KEY_ALIAS=paperpractice
+export PAPER_PRACTICE_KEY_PASSWORD='...'
+sh gradlew :app:assembleRelease --no-daemon --console=plain
+```
+
+The signed APK is written to `app/build/outputs/apk/release/app-release.apk`.
+Keep the keystore and passwords backed up securely; without them you cannot
+publish updates for an installed release.
+
 The 66 JVM tests cover strict JSON validation, recursive categories, sample
 paper consistency, randomized selection, answer associations, rich-text
-formatting, backups, image metadata and privacy, and every exporter. The GitHub
-Actions workflow runs the same checks on pushes and pull requests.
+formatting, backups, image metadata and privacy, and every exporter. The Android
+CI workflow runs the same checks on pushes and pull requests. Pushing a `v*` tag
+runs the release workflow, which builds a signed APK and publishes it on GitHub.
 
 ## Source layout
 
