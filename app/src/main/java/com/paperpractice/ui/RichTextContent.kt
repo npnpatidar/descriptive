@@ -42,9 +42,10 @@ import com.paperpractice.render.RichTextSpans
 /**
  * Renders the rich text subset used by question and answer text.
  *
- * Paragraphs are hosted in a TextView so Android spans can do inline fractions
- * and the familiar text-selection behaviour. Tables stay native Compose layout
- * so they get real borders and do not scroll horizontally off small screens.
+ * Paragraphs are hosted in a TextView so Android spans can do inline fractions.
+ * Text selection is opt-in because selectable TextView content can be measured
+ * at a stale height inside lazy lists. Tables stay native Compose layout so they
+ * get real borders and do not scroll horizontally off small screens.
  */
 @Composable
 fun RichTextContent(
@@ -52,7 +53,7 @@ fun RichTextContent(
     modifier: Modifier = Modifier,
     style: TextStyle = MaterialTheme.typography.bodyLarge,
     color: Color = Color.Unspecified,
-    selectable: Boolean = true
+    selectable: Boolean = false
 ) {
     val document = remember(text) { RichText.parse(text) }
     if (document.blocks.isEmpty()) return

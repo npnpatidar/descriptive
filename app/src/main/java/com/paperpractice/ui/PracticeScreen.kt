@@ -266,7 +266,10 @@ private fun QuestionCard(question: SessionQuestion, showAnswer: Boolean) {
             Column(modifier = Modifier.weight(1f)) {
                 RichTextContent(
                     text = question.questionText,
-                    style = MaterialTheme.typography.bodyLarge
+                    style = MaterialTheme.typography.bodyLarge,
+                    // Selectable TextViews can keep a stale height in lazy
+                    // lists, clipping the end of long questions.
+                    selectable = false
                 )
                 AttachedImages(
                     images = question.questionImages,
@@ -296,7 +299,8 @@ private fun QuestionCard(question: SessionQuestion, showAnswer: Boolean) {
                                     "(No answer provided)"
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = MaterialTheme.colorScheme.onSurface,
+                                selectable = false
                             )
                             AttachedImages(
                                 images = question.answerImages,

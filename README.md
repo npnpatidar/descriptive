@@ -181,9 +181,10 @@ another category, or reorder it within its category. Drag handles on questions,
 categories, and papers also support reordering; the menus provide accessible
 **Move up** and **Move down** alternatives.
 
-Formatted question cards are intended for reading. Text selection is disabled
-there so a tap opens the editor; if you need to copy the original markup, open
-the question editor and select the text in the question or answer field.
+Formatted rich text is intended for reading in the Questions and Practice
+screens. Text selection is disabled in those lists so long content always
+measures to its full height; if you need to copy the original markup, open the
+question editor and select the text in the question or answer field.
 
 **Selection mode** lets you manage several questions at once:
 
@@ -533,13 +534,14 @@ Install a viewer that supports that format, or use **Share** and open the file i
 another app. The exported file is written through Android's document picker.
 
 **Long questions or formulas look clipped.**
-Update to the latest release. Rich-text clipping in question cards was fixed in
-v2.1.1. If it still happens, include the question markup, Android version, and a
-screenshot in an issue.
+Update to the latest release. Rich-text height fixes for the Questions and
+Practice screens are included in v2.1.2. If it still happens, include the
+question markup, Android version, and a screenshot in an issue.
 
-**I cannot select text in a question card.**
-That is intentional: tapping a card opens the editor. Open the editor and select
-the question or answer text there.
+**I cannot select text in a question card or on the Practice screen.**
+That is intentional: text selection is disabled in those reading lists so long
+rich text measures to its full height. Open the question editor and select the
+question or answer text there.
 
 **The app cannot read the selected file.**
 Reopen the document picker and choose the file again. Import works best with a
