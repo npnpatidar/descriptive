@@ -1,5 +1,7 @@
 package com.paperpractice.ui
 
+import android.content.Context
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,15 +25,18 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
@@ -40,17 +45,21 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.edit
 import com.paperpractice.data.PaperDetail
 import com.paperpractice.export.ExportFeedback
 import com.paperpractice.export.ExportFormat
@@ -58,6 +67,17 @@ import com.paperpractice.export.ExportScope
 import com.paperpractice.ui.util.CreateDocumentContract
 import com.paperpractice.ui.util.categoryCountLabel
 import com.paperpractice.ui.util.questionCountLabel
+
+private enum class ExportPreset(
+    val label: String,
+    val description: String,
+    val includeAnswers: Boolean,
+    val answersAtEnd: Boolean
+) {
+    STUDY("Study", "Answers below each question", true, false),
+    TEST("Test", "Question paper only", false, false),
+    ANSWER_KEY("Answer key", "Answers on a new page at the end", true, true)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,12 +94,77 @@ fun ExportScreen(
         selectedCategories.isNotEmpty() -> ExportScope.SELECTED_CATEGORIES
         else -> ExportScope.ENTIRE_PAPER
     }
-    var scope by rememberSaveable(paper?.id) { mutableStateOf(initialScope) }
-    var format by rememberSaveable(paper?.id) { mutableStateOf(ExportFormat.HTML) }
-    var includeAnswers by rememberSaveable(paper?.id) { mutableStateOf(true) }
-    var answersAtEnd by rememberSaveable(paper?.id) { mutableStateOf(false) }
+    val context = LocalContext.current
+    val exportPrefs = remember(paper?.id) {
+        context.getSharedPreferences(
+            "export_settings_${paper?.id ?: "none"}",
+            Context.MODE_PRIVATE
+        )
+    }
+    val savedScope = remember(paper?.id) {
+        runCatching {
+            ExportScope.valueOf(exportPrefs.getString("scope", "")!!)
+        }.getOrNull()
+    }
+    val savedFormat = remember(paper?.id) {
+        runCatching {
+            ExportFormat.valueOf(exportPrefs.getString("format", "")!!)
+        }.getOrNull()
+    }
+    val savedIncludeAnswers = remember(paper?.id) {
+        exportPrefs.getBoolean("includeAnswers", true)
+    }
+    val savedAnswersAtEnd = remember(paper?.id) {
+        exportPrefs.getBoolean("answersAtEnd", false)
+    }
+    val savedPreset = remember(paper?.id) {
+        val name = exportPrefs.getString("preset", ExportPreset.STUDY.name).orEmpty()
+        if (name.isBlank()) {
+            null
+        } else {
+            runCatching { ExportPreset.valueOf(name) }.getOrNull()
+        }
+    }
+    val restoredScope = savedScope?.takeIf { option ->
+        when (option) {
+            ExportScope.CURRENT_TEST -> currentSession != null
+            ExportScope.SELECTED_CATEGORIES -> selectedCategories.isNotEmpty()
+            ExportScope.ENTIRE_PAPER -> true
+        }
+    } ?: initialScope
+    val restoredFormat = savedFormat ?: ExportFormat.HTML
+    val restoredPreset = savedPreset?.takeIf { option ->
+        savedIncludeAnswers &&
+            (option != ExportPreset.ANSWER_KEY || restoredFormat.supportsAnswersAtEnd)
+    }
+
+    var scope by rememberSaveable(paper?.id) { mutableStateOf(restoredScope) }
+    var format by rememberSaveable(paper?.id) { mutableStateOf(restoredFormat) }
+    var includeAnswers by rememberSaveable(paper?.id) {
+        mutableStateOf(savedIncludeAnswers)
+    }
+    var answersAtEnd by rememberSaveable(paper?.id) {
+        mutableStateOf(
+            savedAnswersAtEnd &&
+                savedIncludeAnswers &&
+                restoredFormat.supportsAnswersAtEnd
+        )
+    }
+    var preset by rememberSaveable(paper?.id) {
+        mutableStateOf(restoredPreset)
+    }
     var fileName by rememberSaveable(paper?.id) {
         mutableStateOf(viewModel.suggestedFileName())
+    }
+
+    LaunchedEffect(paper?.id, scope, format, includeAnswers, answersAtEnd, preset) {
+        exportPrefs.edit {
+            putString("scope", scope.name)
+            putString("format", format.name)
+            putBoolean("includeAnswers", includeAnswers)
+            putBoolean("answersAtEnd", answersAtEnd)
+            putString("preset", preset?.name ?: "")
+        }
     }
 
     val createDocument = rememberLauncherForActivityResult(CreateDocumentContract) { uri ->
@@ -209,12 +294,46 @@ fun ExportScreen(
                     FormatOption(
                         format = option,
                         selected = format == option,
-                        onSelect = { format = option }
+                        onSelect = {
+                            format = option
+                            when {
+                                !option.supportsAnswersAtEnd -> {
+                                    answersAtEnd = false
+                                    if (preset == ExportPreset.ANSWER_KEY) preset = null
+                                }
+                                preset == ExportPreset.ANSWER_KEY -> answersAtEnd = true
+                            }
+                        }
                     )
                     if (index != ExportFormat.entries.lastIndex) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
+            }
+
+            SectionLabel("Preset")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ExportPreset.entries.forEach { option ->
+                    FilterChip(
+                        selected = preset == option,
+                        enabled = option != ExportPreset.ANSWER_KEY ||
+                            format.supportsAnswersAtEnd,
+                        onClick = {
+                            preset = option
+                            includeAnswers = option.includeAnswers
+                            answersAtEnd = option.answersAtEnd &&
+                                format.supportsAnswersAtEnd
+                        },
+                        label = { Text(option.label) }
+                    )
+                }
+            }
+            preset?.let {
+                Text(
+                    it.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             Card(
@@ -252,6 +371,7 @@ fun ExportScreen(
                         onCheckedChange = {
                             includeAnswers = it
                             if (!it) answersAtEnd = false
+                            preset = null
                         },
                         enabled = !viewModel.exportState.isExporting
                     )
@@ -292,7 +412,10 @@ fun ExportScreen(
                         Spacer(Modifier.width(12.dp))
                         Switch(
                             checked = answersAtEnd,
-                            onCheckedChange = { answersAtEnd = it },
+                            onCheckedChange = {
+                                answersAtEnd = it
+                                preset = null
+                            },
                             enabled = includeAnswers && !viewModel.exportState.isExporting
                         )
                     }
@@ -328,34 +451,69 @@ fun ExportScreen(
                 )
             }
 
-            Button(
-                onClick = {
-                    val request = viewModel.prepareExport(
-                        scope = scope,
-                        format = format,
-                        includeAnswers = includeAnswers,
-                        answersAtEnd = answersAtEnd,
-                        rawFileName = fileName
-                    )
-                    if (request != null) createDocument.launch(request)
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-                enabled = !viewModel.exportState.isExporting
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                if (viewModel.exportState.isExporting) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text("Saving...")
-                } else {
-                    Icon(Icons.Outlined.FileDownload, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Export ${format.label}")
+                OutlinedButton(
+                    onClick = {
+                        viewModel.shareExport(
+                            scope = scope,
+                            format = format,
+                            includeAnswers = includeAnswers,
+                            answersAtEnd = answersAtEnd,
+                            rawFileName = fileName
+                        ) { request ->
+                            val send = Intent(Intent.ACTION_SEND).apply {
+                                type = request.mimeType
+                                putExtra(Intent.EXTRA_STREAM, request.uri)
+                                putExtra(Intent.EXTRA_TITLE, request.title)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            val chooser = Intent.createChooser(send, "Share ${request.title}")
+                                .apply { addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                            context.startActivity(chooser)
+                        }
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp),
+                    enabled = !viewModel.exportState.isExporting
+                ) {
+                    Icon(Icons.Outlined.Share, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Share")
+                }
+
+                Button(
+                    onClick = {
+                        val request = viewModel.prepareExport(
+                            scope = scope,
+                            format = format,
+                            includeAnswers = includeAnswers,
+                            answersAtEnd = answersAtEnd,
+                            rawFileName = fileName
+                        )
+                        if (request != null) createDocument.launch(request)
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp),
+                    enabled = !viewModel.exportState.isExporting
+                ) {
+                    if (viewModel.exportState.isExporting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Working...")
+                    } else {
+                        Icon(Icons.Outlined.FileDownload, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Save")
+                    }
                 }
             }
 

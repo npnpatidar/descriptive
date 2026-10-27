@@ -1,7 +1,9 @@
 package com.paperpractice.export
 
 import com.paperpractice.domain.CategoryContent
+import com.paperpractice.domain.ImageContent
 import com.paperpractice.domain.PaperContent
+import java.util.Base64
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -15,11 +17,16 @@ object JsonExporter {
     private val prettyJson = Json { prettyPrint = true }
 
     fun build(content: PaperContent, includeAnswers: Boolean): String {
+        val root = buildObject(content, includeAnswers)
+        return prettyJson.encodeToString(JsonElement.serializer(), root) + "\n"
+    }
+
+    fun buildObject(content: PaperContent, includeAnswers: Boolean): JsonObject {
         val exportContent = if (includeAnswers) content else {
             ExportContentBuilder.withoutAnswers(content)
         }
 
-        val root = buildJsonObject {
+        return buildJsonObject {
             put("paperName", exportContent.paperName)
             put(
                 "categories",
@@ -28,8 +35,6 @@ object JsonExporter {
                 }
             )
         }
-
-        return prettyJson.encodeToString(JsonElement.serializer(), root) + "\n"
     }
 
     private fun categoryJson(category: CategoryContent): JsonObject = buildJsonObject {
@@ -42,6 +47,26 @@ object JsonExporter {
                         buildJsonObject {
                             put("questionText", question.questionText)
                             put("answerText", question.answerText)
+                            if (question.questionImages.isNotEmpty()) {
+                                put(
+                                    "questionImages",
+                                    buildJsonArray {
+                                        question.questionImages.forEach { image ->
+                                            add(imageJson(image))
+                                        }
+                                    }
+                                )
+                            }
+                            if (question.answerImages.isNotEmpty()) {
+                                put(
+                                    "answerImages",
+                                    buildJsonArray {
+                                        question.answerImages.forEach { image ->
+                                            add(imageJson(image))
+                                        }
+                                    }
+                                )
+                            }
                         }
                     )
                 }
@@ -55,5 +80,12 @@ object JsonExporter {
                 }
             )
         }
+    }
+
+    private fun imageJson(image: ImageContent): JsonObject = buildJsonObject {
+        put("mimeType", image.mimeType)
+        if (image.width > 0) put("width", image.width)
+        if (image.height > 0) put("height", image.height)
+        put("data", Base64.getEncoder().encodeToString(image.bytes))
     }
 }

@@ -111,7 +111,14 @@ object ExportContentBuilder {
                 children = node!!.children
             }
 
-            node?.questions?.add(QuestionContent(question.questionText, question.answerText))
+            node?.questions?.add(
+                QuestionContent(
+                    questionText = question.questionText,
+                    answerText = question.answerText,
+                    questionImages = question.questionImages,
+                    answerImages = question.answerImages
+                )
+            )
         }
 
         return PaperContent(
@@ -127,7 +134,12 @@ object ExportContentBuilder {
     private fun categoryContent(category: CategoryDetail): CategoryContent = CategoryContent(
         categoryName = category.name,
         questions = category.questions.map {
-            QuestionContent(it.questionText, it.answerText)
+            QuestionContent(
+                questionText = it.questionText,
+                answerText = it.answerText,
+                questionImages = it.questionImages,
+                answerImages = it.answerImages
+            )
         },
         categories = category.children.map(::categoryContent)
     )
@@ -155,7 +167,9 @@ object ExportContentBuilder {
     }
 
     private fun CategoryContent.withoutAnswers(): CategoryContent = copy(
-        questions = questions.map { it.copy(answerText = "") },
+        questions = questions.map {
+            it.copy(answerText = "", answerImages = emptyList())
+        },
         categories = categories.map { it.withoutAnswers() }
     )
 

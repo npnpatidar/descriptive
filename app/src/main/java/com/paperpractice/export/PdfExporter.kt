@@ -1,13 +1,18 @@
 package com.paperpractice.export
 
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import com.paperpractice.domain.CategoryContent
+import com.paperpractice.domain.ImageContent
 import com.paperpractice.domain.PaperContent
+import com.paperpractice.domain.RichText
 import java.io.OutputStream
+import kotlin.math.min
 
 /**
  * Draws a paginated PDF with the platform's PdfDocument. Using Android's text
@@ -31,7 +36,7 @@ object PdfExporter {
                 writer.drawBody("This paper contains no categories.", spacingAfter = 12f)
             }
             var number = 1
-            val answers = mutableListOf<Pair<Int, String>>()
+            val answers = mutableListOf<AnswerEntry>()
 
             fun appendCategory(
                 category: CategoryContent,
@@ -43,15 +48,22 @@ object PdfExporter {
                     category.questions.forEach { question ->
                         writer.drawQuestion(
                             number,
-                            question.questionText,
+                            RichText.format(question.questionText),
                             includeAnswers && !answersAtEnd
                         )
+                        writer.drawImages(question.questionImages)
                         if (includeAnswers) {
-                            val answer = question.answerText.ifEmpty { "(No answer provided)" }
+                            val answer = RichText.format(
+                                question.answerText.ifBlank { "(No answer provided)" }
+                            )
                             if (answersAtEnd) {
-                                answers += number to answer
+                                answers += AnswerEntry(
+                                    number = number,
+                                    text = answer,
+                                    images = question.answerImages
+                                )
                             } else {
-                                writer.drawAnswer(answer)
+                                writer.drawAnswer(answer, question.answerImages)
                             }
                         }
                         number++
@@ -68,8 +80,12 @@ object PdfExporter {
 
             if (includeAnswers && answersAtEnd && answers.isNotEmpty()) {
                 writer.startAnswerSection()
-                answers.forEach { (answerNumber, answerText) ->
-                    writer.drawAnswerEntry(answerNumber, answerText)
+                answers.forEach { answer ->
+                    writer.drawAnswerEntry(
+                        answer.number,
+                        answer.text,
+                        answer.images
+                    )
                 }
             }
             writer.finish()
@@ -78,6 +94,12 @@ object PdfExporter {
             document.close()
         }
     }
+
+    private data class AnswerEntry(
+        val number: Int,
+        val text: String,
+        val images: List<ImageContent>
+    )
 
     private class PageWriter(
         private val document: PdfDocument,
@@ -123,6 +145,7 @@ object PdfExporter {
             strokeWidth = 2f
             style = Paint.Style.STROKE
         }
+        private val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
         private var page: PdfDocument.Page? = null
         private var canvas: Canvas? = null
@@ -179,16 +202,22 @@ object PdfExporter {
             drawCategory("Answers")
         }
 
-        fun drawAnswerEntry(number: Int, text: String) {
+        fun drawAnswerEntry(
+            number: Int,
+            text: String,
+            images: List<ImageContent> = emptyList()
+        ) {
             drawBlock(
                 text = "$number. $text",
                 paint = bodyPaint,
                 lineHeight = 16f,
-                spacingAfter = 12f
+                spacingAfter = if (images.isEmpty()) 12f else 4f
             )
+            drawImages(images)
+            if (images.isNotEmpty()) y += 8f
         }
 
-        fun drawAnswer(text: String) {
+        fun drawAnswer(text: String, images: List<ImageContent> = emptyList()) {
             val lineX = MARGIN_LEFT + 12f
             if (y + 30f > CONTENT_BOTTOM) newPage()
             val targetCanvas = requireNotNull(canvas)
@@ -203,9 +232,50 @@ object PdfExporter {
                 text = "Answer: $text",
                 paint = answerPaint,
                 lineHeight = 15f,
-                spacingAfter = 14f,
+                spacingAfter = if (images.isEmpty()) 14f else 4f,
                 leftIndent = 12f
             )
+            drawImages(images)
+            if (images.isNotEmpty()) y += 8f
+        }
+
+        fun drawImages(images: List<ImageContent>) {
+            images.forEach { image ->
+                val bitmap = try {
+                    BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
+                } catch (_: Exception) {
+                    null
+                } ?: return@forEach
+
+                if (bitmap.width <= 0 || bitmap.height <= 0) return@forEach
+                val maxWidth = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT
+                val maxHeight = min(300f, CONTENT_BOTTOM - MARGIN_TOP)
+                val scale = min(
+                    1f,
+                    min(
+                        maxWidth / bitmap.width.toFloat(),
+                        maxHeight / bitmap.height.toFloat()
+                    )
+                )
+                val drawWidth = bitmap.width * scale
+                val drawHeight = bitmap.height * scale
+
+                if (y + drawHeight + 10f > CONTENT_BOTTOM) newPage()
+                ensurePage()
+                val targetCanvas = requireNotNull(canvas)
+                targetCanvas.drawBitmap(
+                    bitmap,
+                    null,
+                    RectF(
+                        MARGIN_LEFT,
+                        y,
+                        MARGIN_LEFT + drawWidth,
+                        y + drawHeight
+                    ),
+                    imagePaint
+                )
+                y += drawHeight + 8f
+            }
         }
 
         fun drawBody(text: String, spacingAfter: Float) {

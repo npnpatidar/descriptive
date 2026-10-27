@@ -33,7 +33,22 @@ data class CategoryContent(
 
 data class QuestionContent(
     val questionText: String,
-    val answerText: String
+    val answerText: String,
+    val questionImages: List<ImageContent> = emptyList(),
+    val answerImages: List<ImageContent> = emptyList()
+)
+
+/**
+ * Images are stored as compressed bytes and exported as base64 inside JSON.
+ * Keeping the bytes in the content model makes backups, imports, and every
+ * export self-contained.
+ */
+data class ImageContent(
+    val id: String,
+    val mimeType: String,
+    val width: Int,
+    val height: Int,
+    val bytes: ByteArray
 )
 
 /** A problem the user can fix in their JSON file. */

@@ -1,6 +1,9 @@
 package com.paperpractice.export
 
+import com.paperpractice.domain.ImageContent
 import com.paperpractice.domain.PaperContent
+import com.paperpractice.domain.RichText
+import java.util.Base64
 
 /**
  * Self-contained interactive HTML: inline CSS and JavaScript, no network
@@ -39,18 +42,24 @@ object HtmlExporter {
                         appendLine("<div class=\"question-heading\">")
                         appendLine("<span class=\"number\">$number</span>")
                         appendLine(
-                            "<div class=\"question-text\">${escape(question.questionText)}</div>"
+                            "<div class=\"question-text\">${escape(RichText.format(question.questionText))}</div>"
                         )
                         appendLine("</div>")
+                        question.questionImages.forEach { image ->
+                            appendLine(imageTag(image, "question-image"))
+                        }
                         if (includeAnswers) {
                             appendLine("<div class=\"answer\" hidden>")
                             appendLine("<span class=\"answer-label\">Answer</span>")
-                            val answer = if (question.answerText.isEmpty()) {
+                            val answer = if (question.answerText.isBlank()) {
                                 "<span class=\"empty-answer\">(No answer provided)</span>"
                             } else {
-                                escape(question.answerText)
+                                escape(RichText.format(question.answerText))
                             }
                             appendLine("<div class=\"answer-text\">$answer</div>")
+                            question.answerImages.forEach { image ->
+                                appendLine(imageTag(image, "answer-image"))
+                            }
                             appendLine("</div>")
                         }
                         appendLine("</article>")
@@ -107,6 +116,13 @@ object HtmlExporter {
             appendLine("</body>")
             appendLine("</html>")
         }
+    }
+
+    private fun imageTag(image: ImageContent, className: String): String {
+        val encoded = Base64.getEncoder().encodeToString(image.bytes)
+        val alt = if (className == "question-image") "Question image" else "Answer image"
+        return "<img class=\"$className\" src=\"data:${escape(image.mimeType)};base64,$encoded\" " +
+            "alt=\"$alt\" loading=\"lazy\" decoding=\"async\">"
     }
 
     private fun escape(value: String): String = buildString(value.length) {
@@ -232,6 +248,14 @@ object HtmlExporter {
           text-transform: uppercase;
         }
         .empty-answer { color: var(--muted); font-style: italic; }
+        .question-image, .answer-image {
+          display: block;
+          max-width: 100%;
+          height: auto;
+          margin-top: .8rem;
+          border: 1px solid var(--line);
+          border-radius: .5rem;
+        }
         [hidden] { display: none !important; }
         footer { margin-top: 3rem; color: var(--muted); font-size: .8rem; }
         @media print {

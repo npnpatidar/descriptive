@@ -20,7 +20,9 @@ data class SessionQuestion(
     val categoryName: String,
     val questionText: String,
     val answerText: String,
-    val categoryPath: List<String> = emptyList()
+    val categoryPath: List<String> = emptyList(),
+    val questionImages: List<ImageContent> = emptyList(),
+    val answerImages: List<ImageContent> = emptyList()
 )
 
 /**
@@ -82,7 +84,9 @@ object TestGenerator {
                         categoryName = owner.displayName,
                         questionText = question.questionText,
                         answerText = question.answerText,
-                        categoryPath = owner.path
+                        categoryPath = owner.path,
+                        questionImages = question.questionImages,
+                        answerImages = question.answerImages
                     )
                 }
         }

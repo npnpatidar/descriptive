@@ -15,18 +15,26 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.ArrowDownward
+import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Restore
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
@@ -56,6 +64,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.paperpractice.data.ImportMode
 import com.paperpractice.data.PaperSummary
 import com.paperpractice.ui.util.categoryCountLabel
 import com.paperpractice.ui.util.formatImportedAt
@@ -67,18 +76,35 @@ import kotlinx.coroutines.launch
 fun HomeScreen(
     viewModel: MainViewModel,
     onOpenPaper: (String) -> Unit,
-    onOpenQuestions: (String) -> Unit
+    onOpenQuestions: (String) -> Unit,
+    onSearch: () -> Unit
 ) {
     val papers by viewModel.papers.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     var paperToDelete by remember { mutableStateOf<PaperSummary?>(null) }
     var showCreatePaper by remember { mutableStateOf(false) }
+    var homeMenuOpen by remember { mutableStateOf(false) }
 
     val openDocumentContract = remember { ActivityResultContracts.OpenDocument() }
     val importLauncher = rememberLauncherForActivityResult(
         contract = openDocumentContract
     ) { uri ->
         if (uri != null) viewModel.importPaper(uri)
+    }
+    val restoreLauncher = rememberLauncherForActivityResult(
+        contract = openDocumentContract
+    ) { uri ->
+        if (uri != null) viewModel.restoreBackup(uri)
+    }
+    val backupLauncher = rememberLauncherForActivityResult(
+        contract = remember { ActivityResultContracts.CreateDocument("application/json") }
+    ) { uri ->
+        if (uri != null) {
+            viewModel.saveBackup(uri)
+        } else {
+            viewModel.cancelBackup()
+        }
     }
 
     LaunchedEffect(viewModel.homeMessage) {
@@ -101,11 +127,56 @@ fun HomeScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onSearch) {
+                        Icon(Icons.Outlined.Search, contentDescription = "Search everything")
+                    }
                     IconButton(onClick = { showCreatePaper = true }) {
                         Icon(
                             Icons.Outlined.Add,
                             contentDescription = "Create a new paper"
                         )
+                    }
+                    Box {
+                        IconButton(onClick = { homeMenuOpen = true }) {
+                            Icon(
+                                Icons.Outlined.MoreVert,
+                                contentDescription = "Backup and restore"
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = homeMenuOpen,
+                            onDismissRequest = { homeMenuOpen = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Back up all papers") },
+                                leadingIcon = {
+                                    Icon(Icons.Outlined.Backup, contentDescription = null)
+                                },
+                                enabled = papers.isNotEmpty() &&
+                                    !viewModel.isImporting &&
+                                    !viewModel.isPreparingBackup,
+                                onClick = {
+                                    homeMenuOpen = false
+                                    scope.launch {
+                                        viewModel.prepareBackup()?.let { request ->
+                                            backupLauncher.launch(request.fileName)
+                                        }
+                                    }
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Restore backup or paper") },
+                                leadingIcon = {
+                                    Icon(Icons.Outlined.Restore, contentDescription = null)
+                                },
+                                enabled = !viewModel.isImporting &&
+                                    !viewModel.isPreparingBackup,
+                                onClick = {
+                                    homeMenuOpen = false
+                                    restoreLauncher.launch(arrayOf("*/*"))
+                                }
+                            )
+                        }
                     }
                 }
             )
@@ -114,12 +185,12 @@ fun HomeScreen(
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = {
-                    if (!viewModel.isImporting) {
+                    if (!viewModel.isImporting && !viewModel.isPreparingBackup) {
                         importLauncher.launch(arrayOf("*/*"))
                     }
                 },
                 icon = {
-                    if (viewModel.isImporting) {
+                    if (viewModel.isImporting || viewModel.isPreparingBackup) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(20.dp),
                             strokeWidth = 2.dp
@@ -129,7 +200,13 @@ fun HomeScreen(
                     }
                 },
                 text = {
-                    Text(if (viewModel.isImporting) "Importing..." else "Import JSON")
+                    Text(
+                        when {
+                            viewModel.isImporting -> "Importing..."
+                            viewModel.isPreparingBackup -> "Preparing backup..."
+                            else -> "Import JSON"
+                        }
+                    )
                 }
             )
         }
@@ -139,14 +216,14 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            if (viewModel.isImporting) {
+            if (viewModel.isImporting || viewModel.isPreparingBackup) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
 
             if (papers.isEmpty()) {
                 EmptyHome(
                     onImport = {
-                        if (!viewModel.isImporting) {
+                        if (!viewModel.isImporting && !viewModel.isPreparingBackup) {
                             importLauncher.launch(arrayOf("*/*"))
                         }
                     },
@@ -180,11 +257,19 @@ fun HomeScreen(
                         }
                     }
 
-                    items(papers, key = { it.id }) { paper ->
+                    itemsIndexed(
+                        items = papers,
+                        key = { _, paper -> paper.id }
+                    ) { index, paper ->
                         PaperCard(
                             paper = paper,
+                            canMoveUp = index > 0,
+                            canMoveDown = index < papers.lastIndex,
                             onClick = { onOpenPaper(paper.id) },
-                            onDelete = { paperToDelete = paper }
+                            onDelete = { paperToDelete = paper },
+                            onReorder = { delta ->
+                                scope.launch { viewModel.reorderPaper(paper.id, delta) }
+                            }
                         )
                     }
                 }
@@ -207,6 +292,54 @@ fun HomeScreen(
             text = { Text(importError) },
             confirmButton = {
                 TextButton(onClick = viewModel::dismissImportError) { Text("OK") }
+            }
+        )
+    }
+
+    viewModel.importConflict?.let { conflict ->
+        AlertDialog(
+            onDismissRequest = viewModel::cancelImportConflict,
+            icon = {
+                Icon(
+                    Icons.Outlined.Restore,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            },
+            title = { Text(conflict.title) },
+            text = {
+                Column {
+                    Text(conflict.detail)
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Merge adds missing categories and questions. Replace removes the " +
+                            "existing matching papers first. Keep both creates copies.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                Row {
+                    TextButton(
+                        onClick = { viewModel.resolveImportConflict(ImportMode.MERGE) }
+                    ) {
+                        Text("Merge")
+                    }
+                    TextButton(
+                        onClick = { viewModel.resolveImportConflict(ImportMode.REPLACE) }
+                    ) {
+                        Text("Replace", color = MaterialTheme.colorScheme.error)
+                    }
+                    TextButton(
+                        onClick = { viewModel.resolveImportConflict(ImportMode.KEEP_BOTH) }
+                    ) {
+                        Text("Keep both")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelImportConflict) { Text("Cancel") }
             }
         )
     }
@@ -329,9 +462,14 @@ private fun CreatePaperDialog(
 @Composable
 private fun PaperCard(
     paper: PaperSummary,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
     onClick: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onReorder: (Int) -> Unit
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
+
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -384,12 +522,64 @@ private fun PaperCard(
                 )
             }
 
-            IconButton(onClick = onDelete) {
-                Icon(
-                    Icons.Outlined.DeleteOutline,
-                    contentDescription = "Delete ${paper.name}",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            ReorderHandle(
+                contentDescription = "Drag ${paper.name} to reorder",
+                onMove = onReorder,
+                enabled = canMoveUp || canMoveDown
+            )
+            Box {
+                IconButton(onClick = { menuOpen = true }) {
+                    Icon(
+                        Icons.Outlined.MoreVert,
+                        contentDescription = "Options for ${paper.name}"
+                    )
+                }
+                DropdownMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Move up") },
+                        leadingIcon = {
+                            Icon(Icons.Outlined.ArrowUpward, contentDescription = null)
+                        },
+                        enabled = canMoveUp,
+                        onClick = {
+                            menuOpen = false
+                            onReorder(-1)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Move down") },
+                        leadingIcon = {
+                            Icon(Icons.Outlined.ArrowDownward, contentDescription = null)
+                        },
+                        enabled = canMoveDown,
+                        onClick = {
+                            menuOpen = false
+                            onReorder(1)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                "Delete paper",
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Outlined.DeleteOutline,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        },
+                        onClick = {
+                            menuOpen = false
+                            onDelete()
+                        }
+                    )
+                }
             }
         }
     }

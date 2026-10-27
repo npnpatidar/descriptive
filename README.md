@@ -1,59 +1,126 @@
 # Paper Practice
 
-An offline Android app for importing question papers, building randomized
-practice tests, revealing answers, and exporting papers in four formats.
+An offline Android app for importing, organising, practising, and exporting
+question papers. Built with Kotlin, Jetpack Compose, Room, and
+kotlinx.serialization. The app requests no internet permission and stores all
+content on the device.
 
-Built with Kotlin, Jetpack Compose, Room, and no network dependencies.
+## Highlights
+
+- Nested categories to any depth, with aggregate question counts.
+- Randomised practice tests with no repeated questions.
+- Full paper, category, and question editing, including moves and reordering.
+- Search across every paper, category, question, and answer.
+- Multiple question/answer images and an offline formula/chemistry formatter.
+- HTML, DOCX, PDF, and re-importable JSON exports.
+- One-file backup and restore, with safe choices when names already exist.
 
 ## Features
 
-- **Import** `.json` papers from device storage using the system file picker.
-- **Validate** the schema and point at the exact bad field, for example
+### Import and backup
+
+- Import a paper JSON file through Android's document picker.
+- Validation points at the exact bad field, for example
   `categories[1].categories[0].questions[3].answerText is required`.
-- **Persist** every imported paper in a local Room database — no internet needed.
-- **Create papers from scratch**, with full editing for papers, categories, and
-  questions:
-  - add, rename, and delete papers;
-  - add, rename, and delete categories;
-  - add nested subcategories to any depth;
-  - add, edit, and delete questions, with optional answers.
-- **Configure** a test by selecting one or more categories and entering how many
-  questions to take from each, with live validation and a total count. A
-  category's count includes every question in its nested subcategories.
-- **Generate** a randomized test without repeating a question.
-- **Reveal answers** all at once with Show Answers, and hide them again.
-- **Export** the current test, the selected categories, or the whole paper as:
-  - **HTML** — self-contained interactive document with offline Show/Hide
-    Answers buttons.
-  - **DOCX** — editable WordprocessingML document.
-  - **PDF** — paginated A4 document with page breaks for long content.
-  - **JSON** — valid import schema, ready to re-import.
-- For DOCX and PDF, choose whether answers appear below each question or in
-  an answer section at the end. The end section always starts on a new page.
-- Choose whether to include answers and pick the file name and save location in
-  Android's document picker.
-- Rendered exports label categories with their full slash-separated path
-  (`Science/Physics/Mechanics`) and keep questions at the left margin. Headings
-  are emitted only where a category directly owns questions, so empty ancestor
-  levels do not create blank sections. JSON exports keep the nested tree and
-  round-trip through import.
+- When a paper with the same name already exists, choose **Merge**, **Replace**,
+  or **Keep both**.
+- **Merge** adds new categories/questions, updates answers when the incoming
+  answer is present, and keeps a single copy of matching questions.
+- **Back up all papers** to one JSON file and restore it later. A plain paper
+  export can also be opened through Restore/Import.
+- Imported and edited content is stored locally in Room and survives restarts.
+- Imports are transactional, so a failed import never leaves half a paper.
+
+### Organise content
+
+- Create papers from scratch and rename or delete them.
+- Add, rename, move, merge, reorder, and delete categories.
+- Category menus support subcategories, moving inside the paper, moving to
+  another paper, merging into another category, and deleting the whole subtree.
+- Add, edit, move, reorder, select, and bulk-delete questions.
+- **Merge duplicate categories** merges same-named siblings recursively and
+  combines their questions and children.
+- Category counts include all questions in nested subcategories.
+- Categories on the Questions screen start collapsed. Selecting a category in a
+  test includes its entire subtree.
+- Reorder handles include accessible Move up / Move down alternatives in the
+  item menus.
+
+### Search
+
+- Search all papers, category names and paths, question text, and answers.
+- Results are filtered to papers, categories, or questions with one tap.
+- Opening a category or question result expands its category path and scrolls
+  directly to the match.
+- Search is debounced, skips image data, and works completely offline.
+
+### Practice
+
+- Select one or more categories and choose how many questions to take from each.
+- Sampling is without replacement, so a question cannot appear twice.
+- See live validation and a total question count before starting.
+- Show or hide every answer at once, including answer images.
+
+### Export
+
+Export the current test, selected categories, or the entire paper as:
+
+- **HTML** — self-contained interactive page with offline Show/Hide Answers
+  buttons.
+- **DOCX** — editable OOXML document with embedded images.
+- **PDF** — paginated A4 document with embedded images and copy-friendly text.
+- **JSON** — the same import schema, ready to re-import.
+
+For DOCX and PDF, answers can appear below each question or in a numbered
+answer section beginning on a new page. Presets provide quick Study, Test, and
+Answer-key configurations. The last scope/format/answer settings are remembered
+per paper. Render the file into the app cache and share it, or save it through
+Android's document picker.
+
+Rendered exports:
+
+- label categories with their full slash-separated path
+  (`Science/Physics/Mechanics`);
+- keep question text at the left margin;
+- emit headings only for categories that directly own questions, so empty
+  ancestor levels do not create blank sections;
+- embed images in HTML, DOCX, and PDF;
+- omit answer images and answer text from question-only exports.
+
+JSON exports keep the nested tree and image data, so a round trip preserves the
+paper.
+
+### Images and formulas
+
+- Attach multiple images to both questions and answers by picking from the
+  device gallery.
+- Gallery images are orientation-corrected, downscaled to at most 1400 px, and
+  recompressed to keep database rows small.
+- Imported images are limited to 1.5 MB each and to PNG, JPEG/JPG, GIF, WebP, or
+  BMP content.
+- Formula and chemistry shortcuts are formatted for display and export without
+  changing the stored text: `H_2O`, `C_6H_12O_6`, `x^2`, `x^{n+1}`,
+  `\frac{a}{b}`, `\sqrt{x}`, `->`, `<=>`, `\alpha`, `\Delta`.
 
 ## Screens
 
-1. **Home** — imported papers, import/create buttons, delete with confirmation.
-2. **Configure test** — category selection, question counts, total, export, and
-   a shortcut to edit questions.
-3. **Questions** — view, add, edit, and delete questions; add, rename, and delete
-   categories and nested subcategories; rename the paper. Categories are
-   collapsible and start collapsed.
-4. **Practice** — randomized questions grouped by category, Show/Hide Answers.
-5. **Export** — scope, format, answer inclusion, file name, save location.
+1. **Home** — papers, global search, create, import, backup/restore, reorder,
+   and delete with confirmation.
+2. **Search** — results across all papers with kind filters.
+3. **Configure test** — category selection, per-category counts, validation,
+   total, practice start, export, and a shortcut to edit questions.
+4. **Questions** — collapsible category tree, question editing, selection mode,
+   bulk moves/deletes, image editing, and category management.
+5. **Practice** — randomised questions grouped by category with Show/Hide
+   Answers.
+6. **Export** — scope, format, presets, answer placement, file name, save, and
+   share.
 
 ## JSON format
 
 Categories can be nested recursively. A category may contain questions,
-subcategories, or both. Existing flat files with no `categories` array continue
-to work.
+subcategories, or both. Category objects that do not need children can omit the
+nested `categories` array.
 
 ```json
 {
@@ -85,23 +152,49 @@ to work.
 
 `paperName`, top-level `categories`, and `categoryName` are required. Each
 category must contain a `questions` array, a nested `categories` array, or both.
-An answer may be an empty string (useful for question-only exports). Unknown
-extra fields are ignored.
+An answer may be blank. Unknown extra fields are ignored. Paper and category
+names are trimmed on import.
 
-A ready-to-import example is included: [`sample-paper.json`](sample-paper.json).
-It has five top-level sections, 23 categories nested up to four levels, and 53
-questions, including categories that hold both their own questions and
-subcategories.
+Each question may also contain `questionImages` and/or `answerImages`:
+
+```json
+{
+  "questionText": "Label the diagram.",
+  "answerText": "See the annotated image.",
+  "questionImages": [
+    {
+      "mimeType": "image/png",
+      "width": 1200,
+      "height": 800,
+      "data": "<base64-encoded image bytes>"
+    }
+  ]
+}
+```
+
+A backup file wraps complete paper objects:
+
+```json
+{
+  "format": "paper-practice-backup",
+  "version": 1,
+  "exportedAt": 1760000000000,
+  "papers": []
+}
+```
+
+A ready-to-import example is included:
+[`sample-paper.json`](sample-paper.json). It has five top-level sections,
+23 categories nested up to four levels, and 53 questions, including categories
+that hold both their own questions and subcategories.
 
 ## Build
 
-The project builds with JDK 17, Android SDK 37, and Gradle 9.6.1. On this
-aarch64 Alpine host, use the provided toolchain wrapper:
+The project builds with JDK 17, Android SDK 37, and Gradle 9.6.1.
 
 ```sh
-. /opt/mcq-build-env.sh
-cd /sdcard/repo/descriptive
-sh gradlew :app:assembleDebug $MCQ_AAPT2_OVERRIDE --no-daemon --console=plain
+cd descriptive
+sh gradlew :app:assembleDebug --no-daemon --console=plain
 ```
 
 The debug APK is written to:
@@ -110,35 +203,40 @@ The debug APK is written to:
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-A copy of the latest build is also kept at
-`/sdcard/Download/paper-practice-debug.apk` for easy installation.
-
-Run the unit tests and lint with:
+Run the tests, lint, and a debug build:
 
 ```sh
-sh gradlew :app:testDebugUnitTest :app:lintDebug $MCQ_AAPT2_OVERRIDE --no-daemon
+sh gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug \
+  --no-daemon --console=plain
 ```
 
-The 44 JVM tests cover JSON validation (including nested categories),
-round-tripping, randomized selection, answer associations, and the
-HTML/DOCX/PDF/JSON exporters.
+The 66 JVM tests cover strict JSON validation, recursive categories, sample
+paper consistency, randomized selection, answer associations, rich-text
+formatting, backups, image metadata and privacy, and every exporter. The GitHub
+Actions workflow runs the same checks on pushes and pull requests.
 
 ## Source layout
 
 ```
 app/src/main/java/com/paperpractice/
-  data/       Room entities, DAO, repository, paper/category tree models
-  domain/     JSON parser, test generator, import/export content
-  export/     HTML, DOCX, PDF and JSON writers
-  ui/         Compose screens, ViewModel, navigation, theme
-app/src/test/ Parser, generator and exporter tests
+  data/       Room entities, DAO, migrations, repository, content models
+  domain/     JSON parser, test generator, rich text, content models
+  export/     HTML, DOCX, PDF, JSON, and backup writers
+  ui/         Compose screens, ViewModel, navigation, theme, utilities
+app/src/test/ Parser, generator, rich-text, backup, and exporter tests
+app/schemas/  Exported Room schemas used by migrations
 ```
+
+Room database version 4 includes real 2→3 and 3→4 migrations; destructive
+migration fallback is not used.
 
 ## Notes
 
-- Exports go through Android's Storage Access Framework, so the app does not
-  need broad storage permissions.
-- HTML exports contain inline CSS and JavaScript only; they work from a
-  Downloads folder with no data connection.
+- Exports use Android's Storage Access Framework, so the app does not need broad
+  storage permissions.
+- Shared files are exposed through a non-exported `FileProvider` and live under
+  the app's cache directory.
+- HTML exports contain inline CSS and JavaScript only and work offline.
 - DOCX files are generated directly as OOXML, and PDFs use the platform
-  `PdfDocument`, so no external document service is involved.
+  `PdfDocument`; no external document service or network request is involved.
+- The app has no internet permission, analytics, accounts, or cloud storage.

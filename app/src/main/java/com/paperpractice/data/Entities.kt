@@ -9,7 +9,8 @@ import androidx.room.PrimaryKey
 data class PaperEntity(
     @PrimaryKey val id: String,
     val name: String,
-    val importedAt: Long
+    val importedAt: Long,
+    val position: Int = 0
 )
 
 @Entity(
@@ -56,4 +57,27 @@ data class QuestionEntity(
     val questionText: String,
     val answerText: String,
     val position: Int
+)
+
+@Entity(
+    tableName = "question_images",
+    foreignKeys = [
+        ForeignKey(
+            entity = QuestionEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["questionId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [Index("questionId")]
+)
+data class QuestionImageEntity(
+    @PrimaryKey val id: String,
+    val questionId: String,
+    val target: String,
+    val mimeType: String,
+    val width: Int,
+    val height: Int,
+    val position: Int,
+    val data: ByteArray
 )

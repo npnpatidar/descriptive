@@ -37,7 +37,7 @@ class PaperJsonParserTest {
 
         val paper = PaperJsonParser.parse(json)
 
-        assertEquals("  Sample Paper  ", paper.paperName)
+        assertEquals("Sample Paper", paper.paperName)
         assertEquals(2, paper.categories.size)
         assertEquals("History", paper.categories[0].categoryName)
         assertEquals(2, paper.categories[0].questions.size)

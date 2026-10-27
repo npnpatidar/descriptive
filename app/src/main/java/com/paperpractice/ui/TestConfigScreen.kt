@@ -261,7 +261,7 @@ private fun CategoryRow(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = (depth * 18).dp),
+            .padding(start = (depth.coerceAtMost(4) * 18).dp),
         colors = CardDefaults.cardColors(
             containerColor = if (selected) {
                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)

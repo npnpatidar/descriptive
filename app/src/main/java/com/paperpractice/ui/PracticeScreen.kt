@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.paperpractice.domain.RichText
 import com.paperpractice.domain.SessionQuestion
 import com.paperpractice.domain.TestSession
 import com.paperpractice.ui.util.categoryCountLabel
@@ -167,7 +168,9 @@ private fun PracticeContent(
         }
 
         groups.forEach { questions ->
-            val categoryName = questions.first().categoryName
+            val categoryName = questions.first().categoryPath
+                .joinToString(" / ")
+                .ifBlank { questions.first().categoryName }
             item(key = "category-${questions.first().categoryId}") {
                 Row(
                     modifier = Modifier
@@ -265,10 +268,15 @@ private fun QuestionCard(question: SessionQuestion, showAnswer: Boolean) {
             Column(modifier = Modifier.weight(1f)) {
                 SelectionContainer {
                     Text(
-                        text = question.questionText,
+                        text = RichText.format(question.questionText),
                         style = MaterialTheme.typography.bodyLarge
                     )
                 }
+                AttachedImages(
+                    images = question.questionImages,
+                    modifier = Modifier.padding(top = 10.dp),
+                    description = "Question image"
+                )
 
                 if (showAnswer) {
                     HorizontalDivider(
@@ -286,14 +294,22 @@ private fun QuestionCard(question: SessionQuestion, showAnswer: Boolean) {
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        SelectionContainer {
-                            Text(
-                                text = question.answerText.ifEmpty {
-                                    "(No answer provided)"
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.padding(12.dp)
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            SelectionContainer {
+                                Text(
+                                    text = RichText.format(
+                                        question.answerText.ifBlank {
+                                            "(No answer provided)"
+                                        }
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            AttachedImages(
+                                images = question.answerImages,
+                                modifier = Modifier.padding(top = 8.dp),
+                                description = "Answer image"
                             )
                         }
                     }

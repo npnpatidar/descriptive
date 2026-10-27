@@ -10,6 +10,7 @@ import androidx.navigation.navArgument
 
 private object Routes {
     const val HOME = "home"
+    const val SEARCH = "search"
     const val CONFIG = "configure/{paperId}"
     const val QUESTIONS = "questions/{paperId}"
     const val PRACTICE = "practice"
@@ -30,6 +31,28 @@ fun PaperPracticeApp(viewModel: MainViewModel) {
         composable(Routes.HOME) {
             HomeScreen(
                 viewModel = viewModel,
+                onOpenPaper = { paperId ->
+                    navController.navigate(Routes.configure(paperId)) {
+                        launchSingleTop = true
+                    }
+                },
+                onOpenQuestions = { paperId ->
+                    navController.navigate(Routes.questions(paperId)) {
+                        launchSingleTop = true
+                    }
+                },
+                onSearch = {
+                    navController.navigate(Routes.SEARCH) {
+                        launchSingleTop = true
+                    }
+                }
+            )
+        }
+
+        composable(Routes.SEARCH) {
+            SearchScreen(
+                viewModel = viewModel,
+                onBack = { navController.popBackStack() },
                 onOpenPaper = { paperId ->
                     navController.navigate(Routes.configure(paperId)) {
                         launchSingleTop = true

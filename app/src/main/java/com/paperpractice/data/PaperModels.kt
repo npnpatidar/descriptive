@@ -9,6 +9,55 @@ data class PaperSummary(
     val questionCount: Int
 )
 
+/** Lightweight result returned after an import or restore. */
+data class ImportedPaper(
+    val id: String,
+    val name: String,
+    val questionCount: Int
+)
+
+enum class ImportMode {
+    KEEP_BOTH,
+    MERGE,
+    REPLACE
+}
+
+data class ImportConflict(
+    val paperNames: List<String>,
+    val isBackup: Boolean
+) {
+    val title: String
+        get() = if (isBackup) {
+            "Some papers are already on this device"
+        } else {
+            "This paper is already on this device"
+        }
+
+    val detail: String
+        get() {
+            val names = paperNames.take(3).joinToString(", ") { "\"$it\"" }
+            val suffix = if (paperNames.size > 3) {
+                " and ${paperNames.size - 3} more"
+            } else {
+                ""
+            }
+            return "$names$suffix already exist. Choose how to import them."
+        }
+}
+
+enum class SearchHitKind { PAPER, CATEGORY, QUESTION }
+
+data class SearchHit(
+    val kind: SearchHitKind,
+    val paperId: String,
+    val paperName: String,
+    val categoryId: String?,
+    val questionId: String?,
+    val categoryPath: String,
+    val title: String,
+    val preview: String
+)
+
 data class PaperDetail(
     val id: String,
     val name: String,
@@ -167,5 +216,7 @@ data class CategoryDetail(
 data class QuestionDetail(
     val id: String,
     val questionText: String,
-    val answerText: String
+    val answerText: String,
+    val questionImages: List<com.paperpractice.domain.ImageContent> = emptyList(),
+    val answerImages: List<com.paperpractice.domain.ImageContent> = emptyList()
 )
