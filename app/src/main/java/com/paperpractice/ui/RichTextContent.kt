@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -50,7 +51,8 @@ fun RichTextContent(
     text: String,
     modifier: Modifier = Modifier,
     style: TextStyle = MaterialTheme.typography.bodyLarge,
-    color: Color = Color.Unspecified
+    color: Color = Color.Unspecified,
+    selectable: Boolean = true
 ) {
     val document = remember(text) { RichText.parse(text) }
     if (document.blocks.isEmpty()) return
@@ -94,7 +96,7 @@ fun RichTextContent(
                     color = resolvedColor,
                     highlightColor = highlightColor,
                     typeface = typeface,
-                    selectable = true
+                    selectable = selectable
                 )
 
                 is RichBlock.Table -> RichTable(
@@ -141,7 +143,13 @@ private fun RichAndroidParagraph(
     }
 
     AndroidView(
-        modifier = modifier.fillMaxWidth(),
+        // AndroidView normally measures its child with the incoming height
+        // constraint. Inside a scrollable list that can be smaller than the
+        // TextView's content, clipping the tail of long answers until the user
+        // touches the card. Let the TextView measure its full height instead.
+        modifier = modifier
+            .fillMaxWidth()
+            .wrapContentHeight(unbounded = true),
         factory = { context ->
             TextView(context).apply {
                 setPadding(0, 0, 0, 0)
@@ -161,7 +169,9 @@ private fun RichAndroidParagraph(
                 else -> android.view.View.TEXT_ALIGNMENT_VIEW_START
             }
             view.setLineSpacing(0f, lineMultiplier)
+            view.setTextIsSelectable(selectable)
             view.text = spanned.text
+            view.requestLayout()
         }
     )
 }

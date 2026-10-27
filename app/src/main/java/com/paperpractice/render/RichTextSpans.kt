@@ -15,6 +15,7 @@ import com.paperpractice.domain.RichInlineStyle
 import com.paperpractice.domain.RichText
 import kotlin.math.ceil
 import kotlin.math.max
+import kotlin.math.min
 
 data class SpannedRichText(
     val text: SpannableString,
@@ -193,6 +194,16 @@ object RichTextSpans {
                     paint.measureText(numerator),
                     paint.measureText(denominator)
                 ) + originalSize * 0.45f
+                fm?.let { metrics ->
+                    // The fraction is drawn above and below the normal text
+                    // baseline. Tell TextView about that extra extent so its
+                    // measured line height includes the whole formula.
+                    val extent = ceil(originalSize * 0.85f).toInt()
+                    metrics.ascent = min(metrics.ascent, -extent)
+                    metrics.top = min(metrics.top, -extent)
+                    metrics.descent = max(metrics.descent, extent)
+                    metrics.bottom = max(metrics.bottom, extent)
+                }
                 return ceil(width).toInt()
             } finally {
                 paint.textSize = originalSize

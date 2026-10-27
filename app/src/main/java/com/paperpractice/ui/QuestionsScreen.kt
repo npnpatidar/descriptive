@@ -1618,7 +1618,8 @@ private fun QuestionCard(
                 RichTextContent(
                     text = question.questionText,
                     style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    selectable = false
                 )
                 if (!selectionMode) {
                     ReorderHandle(
@@ -1707,7 +1708,8 @@ private fun QuestionCard(
                     RichTextContent(
                         text = question.answerText.ifBlank { "(No answer provided)" },
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface,
+                        selectable = false
                     )
                     AttachedImages(
                         images = question.answerImages,
