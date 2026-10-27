@@ -36,6 +36,9 @@ class PaperRepository(private val database: AppDatabase) {
     suspend fun existingPaperNames(names: Collection<String>): Set<String> =
         names.mapNotNull { dao.findPaperByName(it)?.name }.toSet()
 
+    suspend fun findPaperIdByName(name: String): String? =
+        dao.findPaperByName(name)?.id
+
     private suspend fun importPaperInternal(
         content: PaperContent,
         mode: ImportMode

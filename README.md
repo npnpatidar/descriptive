@@ -201,17 +201,20 @@ A backup file wraps complete paper objects:
 }
 ```
 
-A ready-to-import example is included:
-[`sample-paper.json`](sample-paper.json). It has five top-level sections,
-24 categories nested up to four levels, and 66 questions, including categories
-that hold both their own questions and subcategories. The sample also includes
-embedded diagram and table images, bordered text tables, bold/italic/underline/
+A ready-to-import example is bundled with the app and included in the repository:
+[`sample-paper.json`](app/src/main/assets/sample-paper.json). It has five
+top-level sections, 20 categories nested up to four levels, and 30 questions,
+including categories that hold both their own questions and subcategories. Only
+questions that demonstrate a feature are kept. The sample includes embedded
+diagram and table images, bordered text tables, bold/italic/underline/
 strikethrough/highlighted text, stacked mathematical fractions, chemical
-equations, multi-line answers, and data-interpretation questions.
+equations, multi-line answers, and data-interpretation questions. Use **Load
+sample paper** on the Home screen to import it in one tap and open it.
 
 ## Build
 
-The project builds with JDK 17, Android SDK 37, and Gradle 9.6.1.
+The project builds with JDK 17, Android SDK 37, and Gradle 9.6.1. Release builds
+enable R8 code shrinking and resource shrinking to keep the APK small.
 
 ```sh
 cd descriptive

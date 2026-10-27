@@ -13,18 +13,19 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 /**
- * Keeps the checked-in example in sync with the documented schema. The sample
- * intentionally contains questions and subcategories at the same level and
- * branches several categories deep.
+ * Keeps the bundled example in sync with the documented schema. The sample
+ * intentionally contains questions and subcategories at the same level,
+ * branches several categories deep, and only keeps questions that demonstrate
+ * at least one display or content feature.
  */
 class SamplePaperTest {
 
     @Test
     fun samplePaperIsValidAndComprehensive() {
         val candidates = listOf(
-            File("sample-paper.json"),
-            File("../sample-paper.json"),
-            File("../../sample-paper.json")
+            File("app/src/main/assets/sample-paper.json"),
+            File("src/main/assets/sample-paper.json"),
+            File("../app/src/main/assets/sample-paper.json")
         )
         val file = candidates.firstOrNull { it.isFile }
         if (file == null) {
@@ -36,29 +37,30 @@ class SamplePaperTest {
 
         assertEquals("Comprehensive Sample Paper", paper.paperName)
         assertEquals(5, paper.categories.size)
-        assertEquals(24, paper.categoryCount)
-        assertEquals(66, paper.questionCount)
+        assertEquals(20, paper.categoryCount)
+        assertEquals(30, paper.questionCount)
         assertEquals(4, maxDepth(paper))
 
         assertEquals(
             mapOf(
-                "Science" to 19,
-                "History" to 12,
-                "Mathematics" to 15,
-                "Computer Science" to 12,
-                "General Knowledge" to 8
+                "Science" to 15,
+                "History" to 1,
+                "Mathematics" to 10,
+                "Computer Science" to 3,
+                "General Knowledge" to 1
             ),
             paper.categories.associate { it.categoryName to it.questionCount }
         )
 
         val questions = mutableListOf<QuestionContent>()
         collectQuestions(paper.categories, questions)
-        assertEquals(66, questions.size)
+        assertEquals(30, questions.size)
         assertTrue(questions.all { it.answerText.isNotBlank() })
         assertEquals(
             questions.size,
             questions.map { it.questionText }.toSet().size
         )
+        assertTrue(questions.all(::demonstratesFeature))
         assertEquals(6, questions.sumOf { it.questionImages.size + it.answerImages.size })
         assertTrue(questions.any { it.answerText.contains("->") })
         assertTrue(questions.any { it.answerText.contains("\\frac") })
@@ -73,6 +75,16 @@ class SamplePaperTest {
                 RichText.parse(question.answerText).blocks.count { it is RichBlock.Table }
             }
         )
+    }
+
+    private fun demonstratesFeature(question: QuestionContent): Boolean {
+        if (question.questionImages.isNotEmpty() || question.answerImages.isNotEmpty()) {
+            return true
+        }
+        val text = question.questionText + "\n" + question.answerText
+        return question.answerText.contains("\n") || listOf(
+            "**", "++", "~~", "==", "\\frac", "\\sqrt", "->", "| ---", "_", "^"
+        ).any(text::contains)
     }
 
     private fun maxDepth(paper: PaperContent): Int {

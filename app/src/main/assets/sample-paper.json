@@ -45,10 +45,6 @@
                       "answerText": "The acceleration of an object is directly proportional to the net force acting on it and inversely proportional to its mass: F = ma, or a = \\frac{F}{m}."
                     },
                     {
-                      "questionText": "Define inertia and give one everyday example.",
-                      "answerText": "Inertia is an object's resistance to any change in its state of motion. A passenger continues moving forward when a bus stops suddenly because no forward force has acted on them."
-                    },
-                    {
                       "questionText": "State the law of conservation of momentum.",
                       "answerText": "In a closed system with no external forces, the total momentum before a collision equals the total momentum after it: m_1u_1 + m_2u_2 = m_1v_1 + m_2v_2."
                     }
@@ -62,10 +58,6 @@
                 {
                   "questionText": "State Ohm's law and write its formula.",
                   "answerText": "For a conductor at constant temperature, current is directly proportional to voltage and inversely proportional to resistance: V = IR, or I = \\frac{V}{R}."
-                },
-                {
-                  "questionText": "What is the difference between alternating current and direct current?",
-                  "answerText": "Direct current flows in one direction at a constant voltage. Alternating current periodically reverses direction, as supplied by mains electricity. In the UK, mains alternating current has a frequency of 50 Hz."
                 },
                 {
                   "questionText": "Compare series and parallel circuits.",
@@ -120,14 +112,6 @@
           "categoryName": "Biology",
           "questions": [
             {
-              "questionText": "What is the function of DNA?",
-              "answerText": "DNA stores and transmits genetic information. It provides the instructions for building proteins and for passing traits to offspring."
-            },
-            {
-              "questionText": "What is the difference between mitosis and meiosis?",
-              "answerText": "Mitosis produces two genetically identical body cells and is used for growth and repair. Meiosis produces four genetically different sex cells with half the normal chromosome number."
-            },
-            {
               "questionText": "Compare photosynthesis and cellular respiration in a structured answer. Include the balanced equations.",
               "answerText": "**Photosynthesis**\n- Location: ++chloroplasts++\n- Energy: *light energy* is stored as chemical energy\n- Equation: 6CO_2 + 6H_2O -> C_6H_12O_6 + 6O_2\n\n**Cellular respiration**\n- Location: cytoplasm and mitochondria\n- Energy: chemical energy is released as ++ATP++\n- Equation: C_6H_12O_6 + 6O_2 -> 6CO_2 + 6H_2O\n\n**Summary table**\n\n| Process | Energy flow | Main gas exchange |\n| --- | --- | --- |\n| Photosynthesis | stores energy | takes in CO_2, releases O_2 |\n| Respiration | releases energy | takes in O_2, releases CO_2 |\n\nThe two processes are complementary: ==the products of one are the reactants of the other==."
             }
@@ -137,58 +121,13 @@
     },
     {
       "categoryName": "History",
-      "questions": [
-        {
-          "questionText": "What was the significance of the Magna Carta?",
-          "answerText": "Signed in 1215, it limited the power of the English monarch and established that free people had rights the crown could not ignore."
-        },
-        {
-          "questionText": "Why did the Roman Empire split into eastern and western halves?",
-          "answerText": "The empire had become too large to govern efficiently from one centre. Diocletian's reforms divided administration, and after Theodosius I the two halves passed to separate rulers in 395 CE."
-        }
-      ],
       "categories": [
         {
-          "categoryName": "Ancient History",
-          "questions": [
-            {
-              "questionText": "Who was the first emperor of Rome?",
-              "answerText": "Augustus, who ruled from 27 BCE until 14 CE."
-            },
-            {
-              "questionText": "Why was the Rosetta Stone important?",
-              "answerText": "It carried the same decree in three scripts, including Egyptian hieroglyphs and Greek, which allowed scholars to decipher hieroglyphs."
-            }
-          ]
-        },
-        {
           "categoryName": "Modern History",
-          "questions": [
-            {
-              "questionText": "What event began the French Revolution?",
-              "answerText": "The storming of the Bastille on 14 July 1789 became the defining popular uprising that began the revolution."
-            },
-            {
-              "questionText": "What was the Industrial Revolution?",
-              "answerText": "The shift from hand production to machine manufacturing that began in Britain in the late eighteenth century and transformed economies and societies."
-            }
-          ],
           "categories": [
             {
               "categoryName": "World Wars",
               "questions": [
-                {
-                  "questionText": "Explain the main causes of World War I.",
-                  "answerText": "Nationalism, imperial competition, the alliance system, militarism and the assassination of Archduke Franz Ferdinand combined to turn a regional crisis into a continental war."
-                },
-                {
-                  "questionText": "What were the main terms of the Treaty of Versailles?",
-                  "answerText": "Germany accepted responsibility for the war, lost territory and colonies, limited its armed forces and paid reparations."
-                },
-                {
-                  "questionText": "What was D-Day?",
-                  "answerText": "The Allied invasion of Normandy on 6 June 1944, which opened a major Western Front against Nazi Germany."
-                },
                 {
                   "questionText": "Study the timeline. Describe the sequence of events and explain how 1941 widened the Second World War.",
                   "answerText": "1939: Germany invaded Poland. Britain and France declared war, turning the crisis into a European war.\n\n1941: Operation Barbarossa brought the Soviet Union into the war, and the attack on Pearl Harbor brought the United States in. The conflict became global.\n\n1944: The D-Day landings opened a major Western Front in Normandy.\n\n1945: Germany surrendered in Europe, and the war in the Pacific ended after the atomic bombings of Hiroshima and Nagasaki.\n\nKey idea: the war expanded from a European conflict into a global total war.",
@@ -202,19 +141,6 @@
                   ]
                 }
               ]
-            },
-            {
-              "categoryName": "Cold War",
-              "questions": [
-                {
-                  "questionText": "What was the Cold War?",
-                  "answerText": "The prolonged political, economic and military rivalry between the United States and its allies and the Soviet Union and its allies after the Second World War."
-                },
-                {
-                  "questionText": "Why was the Berlin Wall built?",
-                  "answerText": "East Germany built it in 1961 to stop its citizens fleeing to West Berlin and to seal off the border between the communist east and the capitalist west."
-                }
-              ]
             }
           ]
         }
@@ -222,24 +148,10 @@
     },
     {
       "categoryName": "Mathematics",
-      "questions": [
-        {
-          "questionText": "What is a prime number?",
-          "answerText": "A whole number greater than 1 that has exactly two positive factors: 1 and itself."
-        },
-        {
-          "questionText": "What is the value of pi to two decimal places?",
-          "answerText": "Pi is approximately 3.14. It is the ratio of a circle's circumference to its diameter."
-        }
-      ],
       "categories": [
         {
           "categoryName": "Algebra",
           "questions": [
-            {
-              "questionText": "What is a variable in algebra?",
-              "answerText": "A symbol, usually a letter, that represents an unknown or changing value."
-            },
             {
               "questionText": "Solve 2x + 5 = 11.",
               "answerText": "Subtract 5 from both sides: 2x = 6. Divide by 2: x = \\frac{6}{2} = 3."
@@ -247,10 +159,6 @@
             {
               "questionText": "Expand (x + 2)(x + 3).",
               "answerText": "Multiply each term in the first bracket by each term in the second: x^2 + 3x + 2x + 6 = x^2 + 5x + 6."
-            },
-            {
-              "questionText": "Variation: solve 3x - 7 = 14.",
-              "answerText": "Add 7 to both sides: 3x = 21. Divide by 3: x = 7. Check: 3(7) - 7 = 14."
             },
             {
               "questionText": "Solve the simultaneous equations 2x + y = 11 and x - y = 1.",
@@ -272,10 +180,6 @@
             {
               "questionText": "State the Pythagorean theorem.",
               "answerText": "In a right-angled triangle, the square of the hypotenuse equals the sum of the squares of the other two sides: a^2 + b^2 = c^2."
-            },
-            {
-              "questionText": "What is the sum of the interior angles of a triangle?",
-              "answerText": "180°."
             },
             {
               "questionText": "Use the triangle shown. Verify Pythagoras' theorem and calculate the length of the hypotenuse.",
@@ -320,33 +224,9 @@
     },
     {
       "categoryName": "Computer Science",
-      "questions": [
-        {
-          "questionText": "What is the difference between a CPU and RAM?",
-          "answerText": "The CPU executes instructions and performs calculations. RAM temporarily stores the data and programs currently in use so the CPU can access them quickly."
-        },
-        {
-          "questionText": "What is an algorithm?",
-          "answerText": "A finite, ordered set of unambiguous steps for solving a problem or completing a task."
-        }
-      ],
       "categories": [
         {
           "categoryName": "Programming",
-          "questions": [
-            {
-              "questionText": "What is a variable in programming?",
-              "answerText": "A named storage location whose value can change while a program runs."
-            },
-            {
-              "questionText": "What is a loop used for?",
-              "answerText": "A loop repeats a block of code while a condition is true or for a fixed number of iterations."
-            },
-            {
-              "questionText": "What is a function?",
-              "answerText": "A reusable named block of code that performs a task and may accept inputs and return a result."
-            }
-          ],
           "categories": [
             {
               "categoryName": "Algorithms",
@@ -370,29 +250,8 @@
                 {
                   "questionText": "Trace this loop and state the output.\n\nlet total = 0\nfor (let i = 1; i <= 4; i++) {\n  total += i * i\n}\nprint(total)",
                   "answerText": "The loop adds the squares of 1, 2, 3 and 4:\n\ntotal = 1^2 + 2^2 + 3^2 + 4^2\n      = 1 + 4 + 9 + 16\n      = 30\n\nThe output is 30."
-                },
-                {
-                  "questionText": "Why are sorting algorithms useful?",
-                  "answerText": "Sorted data is easier to search, compare and display, and sorting is often a step inside larger algorithms."
                 }
               ]
-            }
-          ]
-        },
-        {
-          "categoryName": "Databases",
-          "questions": [
-            {
-              "questionText": "What is a primary key?",
-              "answerText": "A column or set of columns that uniquely identifies each row in a table and cannot contain null values."
-            },
-            {
-              "questionText": "What is SQL?",
-              "answerText": "Structured Query Language, a standard language for creating, querying and modifying relational databases."
-            },
-            {
-              "questionText": "What is database normalization?",
-              "answerText": "Organizing tables to reduce duplicated data and prevent update, insert and delete anomalies."
             }
           ]
         }
@@ -400,45 +259,10 @@
     },
     {
       "categoryName": "General Knowledge",
-      "questions": [
-        {
-          "questionText": "Name the largest ocean on Earth.",
-          "answerText": "The Pacific Ocean."
-        },
-        {
-          "questionText": "What is the capital city of Japan?",
-          "answerText": "Tokyo."
-        }
-      ],
       "categories": [
-        {
-          "categoryName": "Geography",
-          "questions": [
-            {
-              "questionText": "Name the seven continents.",
-              "answerText": "Africa, Antarctica, Asia, Australia, Europe, North America and South America."
-            },
-            {
-              "questionText": "What is the equator?",
-              "answerText": "An imaginary line around the middle of the Earth, halfway between the North and South Poles."
-            },
-            {
-              "questionText": "Which ocean lies between Africa and Australia?",
-              "answerText": "The Indian Ocean."
-            }
-          ]
-        },
         {
           "categoryName": "Literature",
           "questions": [
-            {
-              "questionText": "Who wrote the play Romeo and Juliet?",
-              "answerText": "William Shakespeare."
-            },
-            {
-              "questionText": "Who wrote Pride and Prejudice?",
-              "answerText": "Jane Austen."
-            },
             {
               "questionText": "Explain the difference between a simile and a metaphor. Use **bold**, *italic*, ++underline++, ~~strikethrough~~ and ==highlight== in your answer.",
               "answerText": "A **simile** compares two things using *like* or *as*: ++“as brave as a lion”++.\n\nA **metaphor** says that one thing ==is== another: *“the classroom was a zoo”*.\n\n~~A simile and a metaphor are exactly the same device.~~ They are different: a simile makes the comparison explicit, while a metaphor states it directly."

@@ -114,6 +114,12 @@ fun HomeScreen(
         viewModel.clearHomeMessage()
     }
 
+    LaunchedEffect(viewModel.samplePaperToOpen) {
+        // Open the question editor so the sample's rich text, tables, images,
+        // formulas, and fractions are immediately visible.
+        viewModel.consumeSamplePaperToOpen()?.let(onOpenQuestions)
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -241,7 +247,9 @@ fun HomeScreen(
                             importLauncher.launch(arrayOf("*/*"))
                         }
                     },
-                    onCreatePaper = { showCreatePaper = true }
+                    onCreatePaper = { showCreatePaper = true },
+                    onLoadSample = viewModel::loadSamplePaper,
+                    actionsEnabled = !viewModel.isImporting && !viewModel.isPreparingBackup
                 )
             } else {
                 LazyColumn(
@@ -255,19 +263,32 @@ fun HomeScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     item {
-                        Column(modifier = Modifier.padding(bottom = 4.dp)) {
-                            Text(
-                                "Your papers",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                if (papers.size == 1) "1 paper on this device" else {
-                                    "${papers.size} papers on this device"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Your papers",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    if (papers.size == 1) "1 paper on this device" else {
+                                        "${papers.size} papers on this device"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            TextButton(
+                                onClick = viewModel::loadSamplePaper,
+                                enabled = !viewModel.isImporting && !viewModel.isPreparingBackup
+                            ) {
+                                Text("Load sample paper")
+                            }
                         }
                     }
 
@@ -600,7 +621,12 @@ private fun PaperCard(
 }
 
 @Composable
-private fun EmptyHome(onImport: () -> Unit, onCreatePaper: () -> Unit) {
+private fun EmptyHome(
+    onImport: () -> Unit,
+    onCreatePaper: () -> Unit,
+    onLoadSample: () -> Unit,
+    actionsEnabled: Boolean
+) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -647,6 +673,12 @@ private fun EmptyHome(onImport: () -> Unit, onCreatePaper: () -> Unit) {
                 Icon(Icons.Outlined.Add, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("Create a paper")
+            }
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(onClick = onLoadSample, enabled = actionsEnabled) {
+                Icon(Icons.Outlined.Description, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Load sample paper")
             }
             Spacer(Modifier.height(14.dp))
             Text(

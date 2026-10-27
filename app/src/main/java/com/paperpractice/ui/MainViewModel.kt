@@ -138,6 +138,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var homeMessage by mutableStateOf<String?>(null)
         private set
 
+    var samplePaperToOpen by mutableStateOf<String?>(null)
+        private set
+
     var configError by mutableStateOf<String?>(null)
         private set
 
@@ -197,6 +200,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isImporting = false
             }
         }
+    }
+
+    /**
+     * Imports the bundled example paper in one tap. If the sample is already
+     * present, opens that copy instead of creating a duplicate.
+     */
+    fun loadSamplePaper() {
+        if (isImporting || isPreparingBackup) return
+        isImporting = true
+        importError = null
+        homeMessage = null
+
+        viewModelScope.launch {
+            try {
+                val content = withContext(Dispatchers.IO) {
+                    val text = getApplication<Application>().assets
+                        .open(SAMPLE_PAPER_ASSET)
+                        .bufferedReader()
+                        .use { it.readText() }
+                    PaperJsonParser.parse(text)
+                }
+                val existingId = withContext(Dispatchers.IO) {
+                    repository.findPaperIdByName(content.paperName)
+                }
+                if (existingId != null) {
+                    homeMessage = "Sample paper is already loaded."
+                    samplePaperToOpen = existingId
+                    return@launch
+                }
+
+                val imported = withContext(Dispatchers.IO) {
+                    repository.importPapers(listOf(content), ImportMode.KEEP_BOTH)
+                }
+                homeMessage = importSummary(imported, replaced = false)
+                samplePaperToOpen = imported.firstOrNull()?.id
+            } catch (e: PaperFormatException) {
+                importError = "Could not load the sample paper. " +
+                    (e.message ?: "The sample file is not valid.")
+            } catch (e: Exception) {
+                importError = "Could not load the sample paper. " +
+                    (e.message?.takeIf { it.isNotBlank() } ?: "Please try again.")
+            } finally {
+                isImporting = false
+            }
+        }
+    }
+
+    fun consumeSamplePaperToOpen(): String? {
+        val paperId = samplePaperToOpen ?: return null
+        samplePaperToOpen = null
+        return paperId
     }
 
     fun restoreBackup(uri: Uri) {
@@ -1563,6 +1617,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     private companion object {
+        const val SAMPLE_PAPER_ASSET = "sample-paper.json"
         const val MAX_IMAGE_DIMENSION = 1400
         const val MAX_SOURCE_IMAGE_BYTES = 25 * 1024 * 1024
         const val MAX_STORED_IMAGE_BYTES = 1_200_000
