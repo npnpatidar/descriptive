@@ -135,7 +135,8 @@ and paths, question text, and answers. It does not search inside images.
 
 This screen decides what goes into a practice test.
 
-- Expand or collapse the category tree and tick the categories to include.
+- Tap a category that has subcategories to expand or collapse it, or use the
+  arrow beside its name. Tick the checkbox to include the category.
 - Set a question count for each selected category. Counts include questions in
   nested subcategories.
 - Selecting a category replaces any ancestor or descendant that was already

@@ -93,6 +93,18 @@ data class PaperDetail(
     }
 
     /**
+     * Categories that should be visible when some rows are collapsed. A
+     * collapsed category stays visible, while all of its descendants are
+     * hidden.
+     */
+    fun visibleCategories(collapsedCategoryIds: Set<String>): List<CategoryNode> {
+        if (collapsedCategoryIds.isEmpty()) return flattenCategories()
+        return flattenCategories().filter { node ->
+            node.idPath.dropLast(1).none { it in collapsedCategoryIds }
+        }
+    }
+
+    /**
      * Categories that cannot be selected together with [categoryId]: its
      * ancestors and descendants. Selecting a category counts all questions in
      * its whole subtree, so overlapping selections would double-count.

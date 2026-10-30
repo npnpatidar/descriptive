@@ -19,8 +19,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -41,8 +43,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -68,6 +77,15 @@ fun TestConfigScreen(
 
     val paper = viewModel.selectedPaper?.takeIf { it.id == paperId }
     val summary = viewModel.configSummary()
+    var collapsedCategoryIds by rememberSaveable(
+        paperId,
+        stateSaver = listSaver<Set<String>, String>(
+            save = { it.toList() },
+            restore = { it.toSet() }
+        )
+    ) {
+        mutableStateOf(emptySet())
+    }
 
     Scaffold(
         topBar = {
@@ -161,17 +179,28 @@ fun TestConfigScreen(
                                     onClear = viewModel::clearCategorySelection
                                 )
                             }
-                            val categoryNodes = paper.flattenCategories()
+                            val collapsedIds = collapsedCategoryIds
+                            val categoryNodes = paper.visibleCategories(collapsedIds)
                             items(categoryNodes, key = { it.category.id }) { node ->
+                                val categoryId = node.category.id
                                 CategoryRow(
                                     category = node.category,
                                     depth = node.depth,
-                                    selected = node.category.id in viewModel.selectedCategoryIds,
-                                    count = viewModel.requestedCounts[node.category.id].orEmpty(),
-                                    error = summary.countErrors[node.category.id],
-                                    onToggle = { viewModel.toggleCategory(node.category.id) },
+                                    selected = categoryId in viewModel.selectedCategoryIds,
+                                    collapsed = categoryId in collapsedIds,
+                                    count = viewModel.requestedCounts[categoryId].orEmpty(),
+                                    error = summary.countErrors[categoryId],
+                                    onToggle = { viewModel.toggleCategory(categoryId) },
+                                    onToggleExpanded = {
+                                        collapsedCategoryIds =
+                                            if (categoryId in collapsedCategoryIds) {
+                                                collapsedCategoryIds - categoryId
+                                            } else {
+                                                collapsedCategoryIds + categoryId
+                                            }
+                                    },
                                     onCountChange = {
-                                        viewModel.updateCount(node.category.id, it)
+                                        viewModel.updateCount(categoryId, it)
                                     }
                                 )
                             }
@@ -249,14 +278,17 @@ private fun CategoryRow(
     category: CategoryDetail,
     depth: Int,
     selected: Boolean,
+    collapsed: Boolean,
     count: String,
     error: String?,
     onToggle: () -> Unit,
+    onToggleExpanded: () -> Unit,
     onCountChange: (String) -> Unit
 ) {
     val directQuestions = category.questions.size
     val available = category.totalQuestionCount
     val hasQuestions = available > 0
+    val hasChildren = category.children.isNotEmpty()
 
     Card(
         modifier = Modifier
@@ -281,16 +313,57 @@ private fun CategoryRow(
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .clickable(enabled = hasQuestions, onClick = onToggle)
+                        .clickable(
+                            enabled = hasChildren || hasQuestions,
+                            onClickLabel = when {
+                                hasChildren && collapsed -> "Expand category"
+                                hasChildren -> "Collapse category"
+                                selected -> "Deselect category"
+                                else -> "Select category"
+                            },
+                            onClick = {
+                                if (hasChildren) onToggleExpanded() else onToggle()
+                            }
+                        )
+                        .then(
+                            if (hasChildren) {
+                                Modifier.semantics {
+                                    stateDescription = if (collapsed) {
+                                        "Collapsed"
+                                    } else {
+                                        "Expanded"
+                                    }
+                                }
+                            } else {
+                                Modifier
+                            }
+                        )
                         .padding(vertical = 4.dp)
                 ) {
-                    Text(
-                        text = category.name,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = category.name,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (hasChildren) {
+                            Icon(
+                                imageVector = if (collapsed) {
+                                    Icons.AutoMirrored.Outlined.KeyboardArrowRight
+                                } else {
+                                    Icons.Outlined.KeyboardArrowDown
+                                },
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .padding(start = 4.dp)
+                                    .size(20.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                     Text(
                         text = when {
                             hasQuestions && directQuestions > 0 && available > directQuestions ->
