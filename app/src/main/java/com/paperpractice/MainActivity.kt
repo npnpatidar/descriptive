@@ -34,7 +34,11 @@ private fun PaperPracticeRoot() {
     val viewModel: MainViewModel = viewModel()
     val darkTheme = viewModel.themeMode.resolveDarkTheme(isSystemInDarkTheme())
 
-    PaperPracticeTheme(darkTheme = darkTheme) {
+    PaperPracticeTheme(
+        darkTheme = darkTheme,
+        themePalette = viewModel.themePalette,
+        customThemes = viewModel.customThemes
+    ) {
         ApplySystemBarAppearance(darkTheme)
         PaperPracticeApp(viewModel = viewModel)
     }
