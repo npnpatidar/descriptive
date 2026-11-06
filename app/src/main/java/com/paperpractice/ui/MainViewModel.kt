@@ -43,6 +43,12 @@ import com.paperpractice.export.HtmlExporter
 import com.paperpractice.export.JsonExporter
 import com.paperpractice.export.PaperBackup
 import com.paperpractice.export.PdfExporter
+import com.paperpractice.ui.theme.AppTheme
+import com.paperpractice.ui.theme.CustomTheme
+import com.paperpractice.ui.theme.CustomThemeCodec
+import com.paperpractice.ui.theme.InvalidThemeException
+import com.paperpractice.ui.theme.MAX_CUSTOM_THEMES
+import com.paperpractice.ui.theme.MAX_THEME_FILE_BYTES
 import com.paperpractice.ui.theme.ThemeMode
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -121,6 +127,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
         private set
 
+    /** A built-in [AppTheme] key or the key of an imported theme. */
+    var themePalette by mutableStateOf(
+        appearancePreferences.getString("theme_palette", null)
+            ?.takeIf { it.isNotBlank() }
+            ?: AppTheme.PAPER.key
+    )
+        private set
+
+    internal var customThemes by mutableStateOf(
+        CustomThemeCodec.decodeAll(appearancePreferences.getString("custom_themes", null))
+    )
+        private set
+
+    private var isImportingTheme = false
+
     var selectedPaper by mutableStateOf<PaperDetail?>(null)
         private set
 
@@ -186,6 +207,97 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (mode == themeMode) return
         themeMode = mode
         appearancePreferences.edit { putString("theme_mode", mode.name) }
+    }
+
+    fun updateThemePalette(key: String) {
+        if (key == themePalette) return
+        // Stored as-is so an imported key survives a restart; resolveScheme
+        // falls back to Paper if the theme has since been removed.
+        themePalette = key
+        appearancePreferences.edit { putString("theme_palette", key) }
+    }
+
+    /**
+     * Imports a theme file picked by the user and selects it. The read is
+     * capped at [MAX_THEME_FILE_BYTES]: the picker also offers "any file" on
+     * some devices, and a bank or a backup must fail with a sentence, not
+     * fill the heap.
+     */
+    fun importTheme(uri: Uri) {
+        if (isImportingTheme) return
+        isImportingTheme = true
+        homeMessage = null
+        viewModelScope.launch {
+            try {
+                val source = withContext(Dispatchers.IO) { readThemeText(uri) }
+                val parsed = CustomThemeCodec.parse(source)
+                val existing = customThemes
+                val key = existing
+                    .firstOrNull { it.name.equals(parsed.name, ignoreCase = true) }
+                    ?.key
+                    ?: "custom-" + System.currentTimeMillis().toString(36)
+                if (existing.none { it.key == key } && existing.size >= MAX_CUSTOM_THEMES) {
+                    throw InvalidThemeException(
+                        "You can keep up to $MAX_CUSTOM_THEMES imported themes."
+                    )
+                }
+                val updated = existing.filterNot { it.key == key } +
+                    CustomTheme(key, parsed.name, parsed.spec)
+                customThemes = updated
+                themePalette = key
+                appearancePreferences.edit {
+                    putString("custom_themes", CustomThemeCodec.encodeAll(updated))
+                    putString("theme_palette", key)
+                }
+                homeMessage = "Imported theme \"${parsed.name}\"."
+            } catch (e: InvalidThemeException) {
+                homeMessage = e.message ?: "That theme file is not valid."
+            } catch (e: SecurityException) {
+                homeMessage = "The app does not have permission to read that file."
+            } catch (e: Exception) {
+                homeMessage = "Could not import the theme. " +
+                    (e.message?.takeIf { it.isNotBlank() } ?: "Please try again.")
+            } finally {
+                isImportingTheme = false
+            }
+        }
+    }
+
+    fun removeCustomTheme(key: String) {
+        val updated = customThemes.filterNot { it.key == key }
+        if (updated.size == customThemes.size) return
+        val wasSelected = themePalette == key
+        customThemes = updated
+        if (wasSelected) themePalette = AppTheme.PAPER.key
+        appearancePreferences.edit {
+            putString("custom_themes", CustomThemeCodec.encodeAll(updated))
+            if (wasSelected) putString("theme_palette", AppTheme.PAPER.key)
+        }
+        homeMessage = "Removed the imported theme."
+    }
+
+    private fun readThemeText(uri: Uri): String {
+        val resolver = getApplication<Application>().contentResolver
+        val input = resolver.openInputStream(uri)
+            ?: throw IOException("The theme file could not be opened.")
+        return input.use { stream ->
+            val buffer = ByteArray(8 * 1024)
+            val output = ByteArrayOutputStream()
+            var total = 0
+            while (true) {
+                val read = stream.read(buffer)
+                if (read < 0) break
+                total += read
+                if (total > MAX_THEME_FILE_BYTES) {
+                    throw InvalidThemeException(
+                        "That file is too large for a theme " +
+                            "(over ${MAX_THEME_FILE_BYTES / 1024} KB)."
+                    )
+                }
+                output.write(buffer, 0, read)
+            }
+            output.toString(Charsets.UTF_8.name())
+        }
     }
 
     // ---------------------------------------------------------------------

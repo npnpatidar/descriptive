@@ -2,6 +2,9 @@ package com.paperpractice.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,8 +19,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDownward
@@ -39,6 +45,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -64,6 +71,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -72,6 +80,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.paperpractice.data.ImportMode
 import com.paperpractice.data.PaperSummary
+import com.paperpractice.ui.theme.AppTheme
+import com.paperpractice.ui.theme.CustomTheme
 import com.paperpractice.ui.theme.ThemeMode
 import com.paperpractice.ui.util.categoryCountLabel
 import com.paperpractice.ui.util.formatImportedAt
@@ -92,6 +102,7 @@ fun HomeScreen(
     var paperToDelete by remember { mutableStateOf<PaperSummary?>(null) }
     var showCreatePaper by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
+    var themePendingRemoval by remember { mutableStateOf<CustomTheme?>(null) }
     var homeMenuOpen by remember { mutableStateOf(false) }
 
     val openDocumentContract = remember { ActivityResultContracts.OpenDocument() }
@@ -104,6 +115,11 @@ fun HomeScreen(
         contract = openDocumentContract
     ) { uri ->
         if (uri != null) viewModel.restoreBackup(uri)
+    }
+    val themeImportLauncher = rememberLauncherForActivityResult(
+        contract = openDocumentContract
+    ) { uri ->
+        if (uri != null) viewModel.importTheme(uri)
     }
     val backupLauncher = rememberLauncherForActivityResult(
         contract = remember { ActivityResultContracts.CreateDocument("application/json") }
@@ -431,9 +447,49 @@ fun HomeScreen(
 
     if (showThemeDialog) {
         ThemeDialog(
-            selected = viewModel.themeMode,
-            onSelect = viewModel::updateThemeMode,
+            selectedMode = viewModel.themeMode,
+            selectedTheme = viewModel.themePalette,
+            customThemes = viewModel.customThemes,
+            onSelectMode = viewModel::updateThemeMode,
+            onSelectTheme = viewModel::updateThemePalette,
+            onImportTheme = {
+                // Close the dialog first: the picker covers the screen and
+                // the snackbar reporting the result must be visible after.
+                showThemeDialog = false
+                themeImportLauncher.launch(
+                    arrayOf("application/json", "text/plain", "application/octet-stream")
+                )
+            },
+            onRemoveTheme = { themePendingRemoval = it },
             onDismiss = { showThemeDialog = false }
+        )
+    }
+
+    themePendingRemoval?.let { theme ->
+        AlertDialog(
+            onDismissRequest = { themePendingRemoval = null },
+            icon = {
+                Icon(
+                    Icons.Outlined.DeleteOutline,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+            },
+            title = { Text("Remove imported theme?") },
+            text = { Text("Remove \"${theme.name}\" from the theme list?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.removeCustomTheme(theme.key)
+                        themePendingRemoval = null
+                    }
+                ) {
+                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { themePendingRemoval = null }) { Text("Cancel") }
+            }
         )
     }
 
@@ -451,10 +507,20 @@ fun HomeScreen(
 
 @Composable
 private fun ThemeDialog(
-    selected: ThemeMode,
-    onSelect: (ThemeMode) -> Unit,
+    selectedMode: ThemeMode,
+    selectedTheme: String,
+    customThemes: List<CustomTheme>,
+    onSelectMode: (ThemeMode) -> Unit,
+    onSelectTheme: (String) -> Unit,
+    onImportTheme: () -> Unit,
+    onRemoveTheme: (CustomTheme) -> Unit,
     onDismiss: () -> Unit
 ) {
+    // The actual mode, so the swatches match what the app will paint now
+    // instead of always previewing the light palette.
+    val darkPreview = selectedMode.resolveDarkTheme(isSystemInDarkTheme())
+    val selectedCustom = customThemes.firstOrNull { it.key == selectedTheme }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = {
@@ -462,7 +528,7 @@ private fun ThemeDialog(
         },
         title = { Text("Theme") },
         text = {
-            Column {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(
                     "Choose how Paper Practice looks. System default follows your " +
                         "device's light or dark setting.",
@@ -476,15 +542,15 @@ private fun ThemeDialog(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
                             .selectable(
-                                selected = selected == mode,
-                                onClick = { onSelect(mode) },
+                                selected = selectedMode == mode,
+                                onClick = { onSelectMode(mode) },
                                 role = Role.RadioButton
                             )
                             .padding(horizontal = 4.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(
-                            selected = selected == mode,
+                            selected = selectedMode == mode,
                             onClick = null
                         )
                         Column(modifier = Modifier.weight(1f)) {
@@ -500,12 +566,120 @@ private fun ThemeDialog(
                         }
                     }
                 }
+
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Color theme",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Text(
+                    "The light or dark choice above applies to every palette.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+
+                AppTheme.entries.forEach { theme ->
+                    ThemeChoiceRow(
+                        label = theme.label,
+                        summary = theme.summary,
+                        colors = theme.previewColors(darkPreview),
+                        selected = selectedTheme == theme.key,
+                        onClick = { onSelectTheme(theme.key) }
+                    )
+                }
+                customThemes.forEach { theme ->
+                    ThemeChoiceRow(
+                        label = theme.name,
+                        summary = "Imported",
+                        colors = theme.previewColors(darkPreview),
+                        selected = selectedTheme == theme.key,
+                        onClick = { onSelectTheme(theme.key) }
+                    )
+                }
+
+                Spacer(Modifier.height(4.dp))
+                TextButton(onClick = onImportTheme) {
+                    Icon(Icons.Outlined.Add, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Import theme…")
+                }
+                selectedCustom?.let { theme ->
+                    TextButton(onClick = { onRemoveTheme(theme) }) {
+                        Icon(Icons.Outlined.DeleteOutline, contentDescription = null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Remove this theme")
+                    }
+                }
+                Text(
+                    "Pick a theme .json file. Imported themes are added to the " +
+                        "list and selected right away.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         },
         confirmButton = {
             TextButton(onClick = onDismiss) { Text("Done") }
         }
     )
+}
+
+/** One selectable palette: its swatch strip, name and description. */
+@Composable
+private fun ThemeChoiceRow(
+    label: String,
+    summary: String,
+    colors: List<Color>,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .selectable(
+                selected = selected,
+                onClick = onClick,
+                role = Role.RadioButton
+            )
+            .padding(horizontal = 4.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        ThemeSwatches(colors)
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+/**
+ * A compact preview of a palette: background, input surface, then the three
+ * accents. The border keeps a pale swatch (Solarized, Catppuccin) from
+ * disappearing into the row behind it.
+ */
+@Composable
+private fun ThemeSwatches(colors: List<Color>) {
+    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        colors.forEach { color ->
+            Box(
+                modifier = Modifier
+                    .size(11.dp)
+                    .clip(CircleShape)
+                    .background(color)
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+            )
+        }
+    }
 }
 
 @Composable

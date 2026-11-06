@@ -22,7 +22,7 @@ and answers are stored locally on your device.
   and tables.
 - HTML, DOCX, PDF, and re-importable JSON exports.
 - One-file backup and restore, with clear choices when a paper already exists.
-- Light and dark themes that can follow your device setting or stay fixed.
+- Light and dark modes plus 16 colour palettes, including custom theme import.
 - A ready-to-use sample paper included in the app.
 
 ## Contents
@@ -32,6 +32,7 @@ and answers are stored locally on your device.
 - [Quick start](#quick-start)
 - [Using Paper Practice](#using-paper-practice)
   - [Home](#home)
+  - [Colour themes](#colour-themes)
   - [Search](#search)
   - [Configure a test](#configure-a-test)
   - [Questions and categories](#questions-and-categories)
@@ -109,7 +110,8 @@ The Home screen lists every paper on the device.
 - **Import JSON** with the floating action button at the bottom.
 - **Search everything** with the search button in the top bar.
 - **Choose a theme** from the three-dot menu: **System default**, **Light**, or
-  **Dark**. The choice is remembered on the device.
+  **Dark**, plus a colour palette (see [Colour themes](#colour-themes)). The
+  choice is remembered on the device.
 - **Back up all papers** or **Restore backup or paper** from the three-dot menu.
 - **Load sample paper** from the list header, or from the empty-state buttons.
 - Each paper card shows its category count, question count, and when it was
@@ -119,6 +121,50 @@ The Home screen lists every paper on the device.
 
 Deleting a paper, category, or question cannot be undone, so keep a backup of
 anything you want to preserve.
+
+### Colour themes
+
+The Theme dialog keeps the System default / Light / Dark choice and adds a
+**Colour theme** list. **Paper** is the warm palette the app has always used and
+stays the default; the others are Material, Nord, Dracula, Tokyo Night,
+Catppuccin, Gruvbox, One Dark Pro, Monokai, Solarized, Everforest, Rosé Pine,
+Ayu, Night Owl, Kanagawa, and GitHub. Each palette has a light and a dark half,
+so the mode choice above decides which one you see. Palettes are derived from a
+handful of seed colours and any text pair below WCAG AA contrast is adjusted
+automatically.
+
+**Import theme…** accepts a `.json` file and adds it to the list, selecting it
+immediately. The format uses six-digit hex colours; `#` is optional and case
+does not matter:
+
+```json
+{
+  "name": "Midnight",
+  "primary": "#7aa2f7",
+  "secondary": "#bb9af7",
+  "tertiary": "#7dcfff",
+  "error": "#f7768e",
+  "light": {
+    "background": "#e6e7ed",
+    "surface": "#ffffff",
+    "surfaceVariant": "#c4c8da",
+    "onBackground": "#3760bf"
+  },
+  "dark": {
+    "background": "#1a1b26",
+    "surface": "#16161e",
+    "surfaceVariant": "#292e42",
+    "onBackground": "#c0caf5"
+  }
+}
+```
+
+The four accents are shared between modes; only the surface colours differ.
+Importing a file with an existing name replaces that imported theme instead of
+adding a duplicate, up to 20 imported themes. Files are capped at 64 KB, and a
+malformed file is rejected with a message instead of being stored. **Remove this
+theme** deletes the selected imported theme and returns to Paper. A saved key
+that no longer exists also falls back to Paper.
 
 ### Search
 
