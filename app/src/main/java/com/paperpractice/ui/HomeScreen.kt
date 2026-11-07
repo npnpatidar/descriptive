@@ -78,6 +78,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.paperpractice.BuildConfig
 import com.paperpractice.data.ImportMode
 import com.paperpractice.data.PaperSummary
 import com.paperpractice.ui.theme.AppTheme
@@ -252,8 +253,10 @@ fun HomeScreen(
         },
         bottomBar = {
             Surface(color = MaterialTheme.colorScheme.surface) {
+                // The running build's version, so a bug report names the
+                // release the user actually has.
                 Text(
-                    "Made by Naresh",
+                    "v${BuildConfig.VERSION_NAME} · Made by Naresh",
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 10.dp),
