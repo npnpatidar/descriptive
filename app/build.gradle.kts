@@ -31,8 +31,8 @@ android {
         applicationId = "com.paperpractice"
         minSdk = 26
         targetSdk = 36
-        versionCode = 9
-        versionName = "2.4.0"
+        versionCode = 10
+        versionName = "2.4.1"
     }
 
     signingConfigs {
@@ -65,6 +65,9 @@ android {
 
     buildFeatures {
         compose = true
+        // The Home footer shows the running version, so it must be in the APK
+        // rather than copied by hand.
+        buildConfig = true
     }
 
     packaging {
