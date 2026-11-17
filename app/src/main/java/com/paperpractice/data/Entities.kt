@@ -86,3 +86,45 @@ data class QuestionImageEntity(
     val position: Int,
     val data: ByteArray
 )
+
+/** A global, user-owned tag. Identity is [normalizedName], not the display name. */
+@Entity(
+    tableName = "tags",
+    indices = [Index(value = ["normalizedName"], unique = true)]
+)
+data class TagEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val normalizedName: String
+)
+
+/**
+ * Junction between questions and tags. Both foreign keys cascade so deleting a
+ * question or a tag removes its links; the additional tagId index backs the
+ * "questions carrying a tag" and "count links for a tag" lookups. Room does not
+ * support `WITHOUT ROWID` for junction tables at this version, so a composite
+ * primary key is used instead.
+ */
+@Entity(
+    tableName = "question_tags",
+    primaryKeys = ["questionId", "tagId"],
+    foreignKeys = [
+        ForeignKey(
+            entity = QuestionEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["questionId"],
+            onDelete = ForeignKey.CASCADE
+        ),
+        ForeignKey(
+            entity = TagEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["tagId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [Index("tagId")]
+)
+data class QuestionTagEntity(
+    val questionId: String,
+    val tagId: String
+)

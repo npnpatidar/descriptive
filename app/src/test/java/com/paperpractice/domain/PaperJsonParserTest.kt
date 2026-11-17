@@ -355,6 +355,156 @@ class PaperJsonParserTest {
         assertEquals(100_000, image.height)
     }
 
+    @Test
+    fun parsesTagsInOrderAndTrimsThem() {
+        val paper = PaperJsonParser.parse(
+            paperWithTags("""["  World War I  ", "History", "Causes"]""")
+        )
+
+        val question = paper.categories.single().questions[1]
+        assertEquals(listOf("World War I", "History", "Causes"), question.tags)
+    }
+
+    @Test
+    fun oldJsonWithoutTagsYieldsEmptyTags() {
+        val paper = PaperJsonParser.parse(
+            """{"paperName":"P","categories":[{"categoryName":"C","questions":[{"questionText":"Q","answerText":"A"}]}]}"""
+        )
+
+        assertTrue(paper.categories.single().questions.single().tags.isEmpty())
+    }
+
+    @Test
+    fun deduplicatesTagsByNfcAndCaseKeepingFirstSpelling() {
+        // The first entry uses a decomposed e-acute, the second a composed one;
+        // "HISTORY" and "History" differ only by case. Both pairs must dedupe
+        // while the first spelling seen is kept for display.
+        val paper = PaperJsonParser.parse(
+            paperWithTags("""["Cafe\u0301", "caf\u00e9", "HISTORY", "History"]""")
+        )
+
+        assertEquals(listOf("Cafe\u0301", "HISTORY"), paper.categories.single().questions[1].tags)
+    }
+
+    @Test
+    fun acceptsTagAtTheLengthLimit() {
+        val tag = "x".repeat(40)
+        val paper = PaperJsonParser.parse(paperWithTags("""["$tag"]"""))
+
+        assertEquals(listOf(tag), paper.categories.single().questions[1].tags)
+    }
+
+    @Test
+    fun rejectsTagsThatAreNotAnArray() {
+        val message = failureMessage(paperWithTags("\"History\""))
+
+        assertTrue(message.contains("categories[0].questions[1].tags must be an array."))
+    }
+
+    @Test
+    fun rejectsNonStringTagEntry() {
+        val numberMessage = failureMessage(paperWithTags("[123]"))
+        assertTrue(numberMessage.contains("categories[0].questions[1].tags[0] must be a string."))
+
+        val objectMessage = failureMessage(paperWithTags("""[{}]"""))
+        assertTrue(objectMessage.contains("categories[0].questions[1].tags[0] must be a string."))
+    }
+
+    @Test
+    fun rejectsBlankTag() {
+        val message = failureMessage(paperWithTags("""["History", "Science", "   "]"""))
+
+        assertTrue(message.contains("categories[0].questions[1].tags[2] must not be empty."))
+    }
+
+    @Test
+    fun rejectsTagLongerThanFortyCharacters() {
+        val tooLong = "x".repeat(41)
+        val message = failureMessage(paperWithTags("""["ok", "$tooLong"]"""))
+
+        assertTrue(
+            message.contains(
+                "categories[0].questions[1].tags[1] must not be longer than 40 characters."
+            )
+        )
+    }
+
+    @Test
+    fun rejectsTagContainingLineBreak() {
+        val withNewline = failureMessage(paperWithTags("""["History\nTag"]"""))
+        assertTrue(
+            withNewline.contains(
+                "categories[0].questions[1].tags[0] must not contain line breaks."
+            )
+        )
+
+        val withCarriageReturn = failureMessage(paperWithTags("""["History\rTag"]"""))
+        assertTrue(
+            withCarriageReturn.contains(
+                "categories[0].questions[1].tags[0] must not contain line breaks."
+            )
+        )
+    }
+
+    @Test
+    fun rejectsMoreThanTwentyDistinctTags() {
+        val tags = (1..21).joinToString(", ") { "\"tag$it\"" }
+        val message = failureMessage(paperWithTags("[$tags]"))
+
+        assertTrue(message.contains("categories[0].questions[1].tags must contain at most 20 entries."))
+    }
+
+    @Test
+    fun countsDistinctTagsAfterDedupeForTheCap() {
+        // 21 entries, but "Tag 1" and "tag 1" dedupe to one, leaving 20 distinct.
+        val tags = ((1..20).map { "\"Tag $it\"" } + "\"tag 1\"").joinToString(", ")
+        val paper = PaperJsonParser.parse(paperWithTags("[$tags]"))
+
+        assertEquals(20, paper.categories.single().questions[1].tags.size)
+    }
+
+    @Test
+    fun ignoresUnknownFieldsAlongsideTags() {
+        val json = """
+            {
+              "paperName": "P",
+              "futurePaperField": {"x": 1},
+              "categories": [
+                {
+                  "categoryName": "C",
+                  "futureCategoryField": true,
+                  "questions": [
+                    {
+                      "questionText": "Q",
+                      "answerText": "A",
+                      "tags": ["History"],
+                      "futureQuestionField": "ignored"
+                    }
+                  ]
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val question = PaperJsonParser.parse(json).categories.single().questions.single()
+        assertEquals(listOf("History"), question.tags)
+    }
+
+    private fun paperWithTags(tagsJson: String): String = """
+        {
+          "paperName": "P",
+          "categories": [
+            {
+              "categoryName": "C",
+              "questions": [
+                {"questionText": "Q0", "answerText": "A0"},
+                {"questionText": "Q1", "answerText": "A1", "tags": $tagsJson}
+              ]
+            }
+          ]
+        }
+    """.trimIndent()
+
     private fun nestedCategoryPaper(levels: Int): String {
         var category = """{"categoryName":"C","questions":[]}"""
         repeat(levels - 1) {

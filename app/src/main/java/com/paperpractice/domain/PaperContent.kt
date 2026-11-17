@@ -35,7 +35,8 @@ data class QuestionContent(
     val questionText: String,
     val answerText: String,
     val questionImages: List<ImageContent> = emptyList(),
-    val answerImages: List<ImageContent> = emptyList()
+    val answerImages: List<ImageContent> = emptyList(),
+    val tags: List<String> = emptyList()
 )
 
 /**

@@ -1,5 +1,23 @@
 package com.paperpractice.data
 
+/** A user-owned tag from the global library. [normalizedName] is its identity. */
+data class Tag(
+    val id: String,
+    val name: String,
+    val normalizedName: String
+)
+
+/**
+ * One row of the question/tag join used by the batched tag lookup. Room maps
+ * the aliased columns by name, so they must match the DAO query exactly.
+ */
+data class QuestionTagRow(
+    val questionId: String,
+    val tagId: String,
+    val name: String,
+    val normalizedName: String
+)
+
 /** Lightweight row used by the home screen so large papers are never loaded. */
 data class PaperSummary(
     val id: String,
@@ -140,6 +158,11 @@ data class PaperDetail(
     fun allCategoryIds(): Set<String> =
         flattenCategories().mapTo(linkedSetOf()) { it.category.id }
 
+    /** Every tag display name used by any question in this paper. */
+    fun allTags(): Set<String> = categories.flatMapTo(linkedSetOf<String>()) {
+        it.subtreeTags()
+    }
+
     /** Rebuilds the tree without the given categories and their descendants. */
     fun removeCategories(categoryIds: Set<String>): PaperDetail = copy(
         categories = categories.mapNotNull { it.removeCategories(categoryIds) }
@@ -187,6 +210,11 @@ data class CategoryDetail(
     fun allQuestions(): List<QuestionDetail> =
         questions + children.flatMap { it.allQuestions() }
 
+    /** Every tag display name used by questions in this subtree. */
+    fun subtreeTags(): Set<String> = allQuestions().flatMapTo(linkedSetOf<String>()) {
+        it.tags
+    }
+
     val totalCategoryCount: Int
         get() = 1 + children.sumOf { it.totalCategoryCount }
 
@@ -230,5 +258,7 @@ data class QuestionDetail(
     val questionText: String,
     val answerText: String,
     val questionImages: List<com.paperpractice.domain.ImageContent> = emptyList(),
-    val answerImages: List<com.paperpractice.domain.ImageContent> = emptyList()
+    val answerImages: List<com.paperpractice.domain.ImageContent> = emptyList(),
+    /** Global tag display names, sorted case-insensitively. */
+    val tags: List<String> = emptyList()
 )

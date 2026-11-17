@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import java.text.Normalizer
 import java.util.Base64
 import java.util.UUID
 
@@ -21,6 +22,8 @@ object PaperJsonParser {
     private const val MAX_IMAGE_BYTES = 1_500_000
     private const val MAX_IMAGE_DIMENSION = 100_000
     private const val MAX_CATEGORY_DEPTH = 64
+    private const val MAX_TAGS_PER_QUESTION = 20
+    private const val MAX_TAG_LENGTH = 40
     private val imageMimePattern = Regex("image/(png|jpe?g|gif|webp|bmp)")
 
     fun parse(source: String): PaperContent {
@@ -157,9 +160,56 @@ object PaperJsonParser {
                 questionObject,
                 "answerImages",
                 "$questionPath.answerImages"
-            )
+            ),
+            tags = parseTags(questionObject, "$questionPath.tags")
         )
     }
+
+    /**
+     * Optional per-question display names. Entries are trimmed, validated, and
+     * deduplicated by their NFC + lowercase form while the first spelling seen
+     * is kept for display.
+     */
+    private fun parseTags(obj: JsonObject, path: String): List<String> {
+        val element = obj["tags"] ?: return emptyList()
+        val array = element as? JsonArray
+            ?: throw PaperFormatException("$path must be an array.")
+
+        val result = mutableListOf<String>()
+        val seen = hashSetOf<String>()
+        array.forEachIndexed { index, tagElement ->
+            val itemPath = "$path[$index]"
+            val primitive = tagElement as? JsonPrimitive
+                ?: throw PaperFormatException("$itemPath must be a string.")
+            if (!primitive.isString) {
+                throw PaperFormatException("$itemPath must be a string.")
+            }
+            val value = primitive.content.trim()
+            if (value.isEmpty()) {
+                throw PaperFormatException("$itemPath must not be empty.")
+            }
+            if (value.length > MAX_TAG_LENGTH) {
+                throw PaperFormatException(
+                    "$itemPath must not be longer than $MAX_TAG_LENGTH characters."
+                )
+            }
+            if (value.any { it == '\r' || it == '\n' }) {
+                throw PaperFormatException("$itemPath must not contain line breaks.")
+            }
+            if (seen.add(normalizeTag(value))) {
+                result.add(value)
+            }
+        }
+        if (result.size > MAX_TAGS_PER_QUESTION) {
+            throw PaperFormatException(
+                "$path must contain at most $MAX_TAGS_PER_QUESTION entries."
+            )
+        }
+        return result
+    }
+
+    private fun normalizeTag(value: String): String =
+        Normalizer.normalize(value, Normalizer.Form.NFC).lowercase()
 
     private fun parseImages(
         obj: JsonObject,

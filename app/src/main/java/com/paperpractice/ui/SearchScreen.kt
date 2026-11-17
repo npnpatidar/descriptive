@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -33,6 +35,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -44,8 +47,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.paperpractice.data.SearchHit
 import com.paperpractice.data.SearchHitKind
+import com.paperpractice.data.Tag
 import com.paperpractice.domain.RichText
 
 private enum class SearchFilter(val label: String) {
@@ -64,6 +69,7 @@ fun SearchScreen(
     onOpenQuestions: (String) -> Unit
 ) {
     var filter by rememberSaveable { mutableStateOf(SearchFilter.ALL) }
+    val tags by viewModel.tags.collectAsStateWithLifecycle()
     val hits = viewModel.searchResults.filter { hit ->
         when (filter) {
             SearchFilter.ALL -> true
@@ -134,6 +140,21 @@ fun SearchScreen(
                         label = { Text(option.label) }
                     )
                 }
+            }
+
+            if (tags.isNotEmpty()) {
+                TagFilterChips(
+                    tags = tags,
+                    selectedTagIds = viewModel.tagFilterIds,
+                    onToggleTag = { tagId ->
+                        val current = viewModel.tagFilterIds
+                        viewModel.setTagFilter(
+                            if (tagId in current) current - tagId else current + tagId
+                        )
+                    },
+                    onClearTags = viewModel::clearTagFilter,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
             }
 
             when {
@@ -310,6 +331,59 @@ private fun SearchResultCard(
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Wrapping row of tag filter chips shared by the search and test-configuration
+ * screens. [selectedTagIds] is owned by the ViewModel: toggling reports a new
+ * set through [onToggleTag] rather than keeping local selection state.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+internal fun TagFilterChips(
+    tags: List<Tag>,
+    selectedTagIds: Set<String>,
+    onToggleTag: (String) -> Unit,
+    onClearTags: () -> Unit,
+    modifier: Modifier = Modifier,
+    hint: String? = null
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+    ) {
+        if (!hint.isNullOrBlank()) {
+            Text(
+                text = hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(4.dp))
+        }
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            tags.forEach { tag ->
+                FilterChip(
+                    selected = tag.id in selectedTagIds,
+                    onClick = { onToggleTag(tag.id) },
+                    label = { Text(tag.name) },
+                    modifier = Modifier.height(48.dp)
+                )
+            }
+            if (selectedTagIds.isNotEmpty()) {
+                TextButton(
+                    onClick = onClearTags,
+                    modifier = Modifier.height(48.dp)
+                ) {
+                    Text("Clear tags")
                 }
             }
         }

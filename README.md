@@ -15,6 +15,7 @@ and answers are stored locally on your device.
 ## Highlights
 
 - Nested categories with aggregate question counts.
+- Reusable tags on questions, with tag-based search and practice filters.
 - Randomised practice tests with no repeated questions.
 - Full paper, category, and question editing, including moves and reordering.
 - Search across every paper, category, question, and answer.
@@ -33,6 +34,7 @@ and answers are stored locally on your device.
 - [Using Paper Practice](#using-paper-practice)
   - [Home](#home)
   - [Colour themes](#colour-themes)
+  - [Tags](#tags)
   - [Search](#search)
   - [Configure a test](#configure-a-test)
   - [Questions and categories](#questions-and-categories)
@@ -113,6 +115,8 @@ The Home screen lists every paper on the device.
   **Dark**, plus a colour palette (see [Colour themes](#colour-themes)). The
   choice is remembered on the device.
 - **Back up all papers** or **Restore backup or paper** from the three-dot menu.
+- **Manage tags** from the three-dot menu to rename, merge, or delete tags across
+  your whole library, or remove tags that are no longer used (see [Tags](#tags)).
 - **Load sample paper** from the list header, or from the empty-state buttons.
 - Each paper card shows its category count, question count, and when it was
   added.
@@ -166,14 +170,42 @@ malformed file is rejected with a message instead of being stored. **Remove this
 theme** deletes the selected imported theme and returns to Paper. A saved key
 that no longer exists also falls back to Paper.
 
+### Tags
+
+Tags are short labels you attach to questions, for topics, difficulty, or
+anything else you want to group by. They are kept in one library for the whole
+app: a tag has a single name, so typing the same tag on another question reuses
+it rather than making a duplicate. Capitalisation and accented spelling
+variants count as the same tag, and the first spelling you used is the one shown.
+
+For example, open a paper, edit a question, tap **Add tag**, and choose
+`Mechanics` (or type it to create it). Then open **Configure test** for that
+paper, tap the `Mechanics` filter chip under the category list, and generate a
+test: only questions carrying that tag are drawn, and the available counts
+update to match. In **Search**, the same tag chips narrow results to tagged
+questions, and typing a tag name also finds those questions. On the Practice
+screen, each question shows the tags it carried when the test was generated.
+
+On Home, **Manage tags** lets you rename a tag everywhere at once, merge one tag
+into another, delete a tag from every question that used it, and clear tags
+that no question uses any more. Deleting a tag never deletes your questions.
+
+A question can carry at most 20 tags, each up to 40 characters long with no line
+breaks. Tags are included in JSON exports and backups and survive re-importing.
+In JSON files they appear as an optional `"tags"` array on each question (see
+[JSON format](#json-format)).
+
 ### Search
 
 Search covers all papers on the device, including paper names, category names
-and paths, question text, and answers. It does not search inside images.
+and paths, question text, answers, and the tags attached to questions. It does
+not search inside images.
 
 - Enter at least two characters. Results update as you type.
 - Use the **All**, **Questions**, **Categories**, and **Papers** filters to
   narrow the list.
+- Tap tag chips below the filters to show only questions carrying those tags;
+  **Clear tags** removes the restriction.
 - Open a category or question result to jump straight to it. The app expands the
   matching category path and scrolls the question into view.
 
@@ -188,6 +220,9 @@ This screen decides what goes into a practice test.
 - Selecting a category replaces any ancestor or descendant that was already
   selected, so overlapping selections cannot double-count questions.
 - Use **Select all** or **Clear** to change the selection quickly.
+- Tap tag chips under the category list to practise only questions with those
+  tags. If several tags are selected, a question matching any of them can be
+  drawn. The available counts and validation use the filtered totals.
 - The screen shows a running total and explains any validation problem before
   you start.
 - **Generate test** creates a random test from the selected categories.
@@ -226,8 +261,12 @@ images. Tap a card to edit it. In the editor you can:
 - Save, delete, or cancel.
 
 The answer is optional; a question can be saved with an empty answer. Question
-text is required. Use the question's three-dot menu to edit it, move it to
-another category, or reorder it within its category. Drag handles on questions,
+text is required. In the editor you can also attach tags with **Add tag**: tap an
+existing tag to reuse it, or type a new name to create one for the whole app.
+Tap a tag chip's close icon to remove it from the question.
+
+Use the question's three-dot menu to edit it, move it to another category, or
+reorder it within its category. Drag handles on questions,
 categories, and papers also support reordering; the menus provide accessible
 **Move up** and **Move down** alternatives.
 
@@ -257,6 +296,7 @@ The Practice screen shows the generated test, grouped by category.
   rather than being drowned out by a larger category.
 - **Show Answers** reveals every answer and answer image at once;
   **Hide Answers** hides them again.
+- Each question shows the tags it carried when the test was generated.
 - This is a study view, not a graded quiz. The app does not keep scores or track
   correct and incorrect answers.
 - Use the export button to export just this test.
@@ -385,6 +425,9 @@ Limits and formats:
 - Each image embedded in JSON must decode to **1.5 MB or less**.
 - Embedded image types: PNG, JPEG/JPG, GIF, WebP, or BMP.
 - An image's optional `width` and `height` must be between 0 and 100000.
+- A question's optional `tags` array holds at most 20 distinct names, each up to
+  40 characters, non-blank and without line breaks; names differing only by
+  capitalisation or accent are treated as the same tag.
 - Extremely deep category trees are rejected (more than 64 levels).
 - Extra unknown fields are ignored; invalid known fields produce an error naming
   the exact location, such as
@@ -455,7 +498,8 @@ array.
       "questions": [
         {
           "questionText": "State Newton's second law of motion.",
-          "answerText": "F = ma."
+          "answerText": "F = ma.",
+          "tags": ["Mechanics", "Newton"]
         }
       ],
       "categories": [
@@ -487,6 +531,7 @@ array.
 | `answerText` | Yes | May be an empty string, but the field must be present. |
 | `questionImages` | No | Array of image objects. |
 | `answerImages` | No | Array of image objects. |
+| `tags` | No | Array of tag-name strings on a question; at most 20 distinct, each up to 40 characters. |
 
 Each image object needs a `mimeType` and base64-encoded `data`. `width` and
 `height` are optional hints; the app can infer dimensions from common image
@@ -552,9 +597,11 @@ backup first if you might need the content later.
 
 **The app says the JSON is invalid.**
 Read the field path in the message. Common causes are a missing `answerText`, a
-blank `questionText`, a category with neither `questions` nor `categories`, or an
-image that is too large or not one of the supported types. `answerText` may be
-empty, but it must still exist.
+blank `questionText`, a category with neither `questions` nor `categories`, an
+image that is too large or not one of the supported types, or a `tags` entry that
+is not a string, is blank, is over 40 characters, contains a line break, or
+pushes a question past 20 distinct tags. `answerText` may be empty, but it must
+still exist.
 
 **An image in an imported paper is rejected.**
 Check that it is PNG, JPEG/JPG, GIF, WebP, or BMP, that it is no larger than
@@ -634,10 +681,10 @@ sh gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug \
   --no-daemon --console=plain
 ```
 
-The suite contains 126 JVM tests covering strict JSON validation, recursive
-categories, sample-paper consistency, randomised selection, answer
-associations, rich-text formatting, backups, image metadata and privacy, and
-every exporter.
+The suite contains 161 JVM tests covering strict JSON validation, recursive
+categories, sample-paper consistency, randomised selection, tag parsing and
+filtering, answer associations, rich-text formatting, backups, image metadata
+and privacy, and every exporter.
 
 ### Release signing
 
@@ -677,8 +724,8 @@ app/src/test/         Parser, generator, rich-text, backup, and exporter tests
 app/schemas/          Exported Room schemas used by migrations
 ```
 
-Room database version 5 includes real 2→3, 3→4 and 4→5 migrations; destructive
-migration fallback is not used.
+Room database version 6 includes real 2→3, 3→4, 4→5 and 5→6 migrations;
+destructive migration fallback is not used.
 
 ## License
 
