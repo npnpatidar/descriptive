@@ -29,7 +29,12 @@ data class PaperEntity(
             onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index("paperId"), Index("parentId")]
+    indices = [
+        Index("paperId"),
+        Index("parentId"),
+        Index("paperId", "parentId"),
+        Index("paperId", "position")
+    ]
 )
 data class CategoryEntity(
     @PrimaryKey val id: String,
@@ -49,7 +54,7 @@ data class CategoryEntity(
             onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index("categoryId")]
+    indices = [Index("categoryId"), Index("categoryId", "position")]
 )
 data class QuestionEntity(
     @PrimaryKey val id: String,

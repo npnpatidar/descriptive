@@ -86,7 +86,7 @@ abstract class PaperDao {
         SELECT *
           FROM categories
          WHERE paperId = :paperId
-           AND ((:parentId IS NULL AND parentId IS NULL) OR parentId = :parentId)
+           AND parentId IS :parentId
          ORDER BY position ASC, id ASC
         """
     )
@@ -125,7 +125,7 @@ abstract class PaperDao {
         SELECT COALESCE(MAX(position), -1) + 1
           FROM categories
          WHERE paperId = :paperId
-           AND ((:parentId IS NULL AND parentId IS NULL) OR parentId = :parentId)
+           AND parentId IS :parentId
         """
     )
     abstract suspend fun nextCategoryPosition(paperId: String, parentId: String?): Int
@@ -217,6 +217,24 @@ abstract class PaperDao {
         """
     )
     abstract suspend fun findQuestionImages(paperId: String): List<QuestionImageEntity>
+
+    /**
+     * Loads the image rows for an explicit set of questions in one bounded
+     * query. This is the on-demand counterpart of [findQuestionImages]: callers
+     * holding an image-free tree can fetch just the bytes they need, without a
+     * whole-paper scan (and without an N+1 query per question).
+     */
+    @Query(
+        """
+        SELECT qi.*
+          FROM question_images qi
+         WHERE qi.questionId IN (:questionIds)
+         ORDER BY qi.questionId ASC, qi.position ASC, qi.id ASC
+        """
+    )
+    abstract suspend fun findImagesByQuestionIds(
+        questionIds: List<String>
+    ): List<QuestionImageEntity>
 
     @Insert
     abstract suspend fun insertQuestionImages(images: List<QuestionImageEntity>)

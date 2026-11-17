@@ -50,6 +50,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -189,7 +191,7 @@ fun TestConfigScreen(
                                     selected = categoryId in viewModel.selectedCategoryIds,
                                     collapsed = categoryId in collapsedIds,
                                     count = viewModel.requestedCounts[categoryId].orEmpty(),
-                                    error = summary.countErrors[categoryId],
+                                    countError = summary.countErrors[categoryId],
                                     onToggle = { viewModel.toggleCategory(categoryId) },
                                     onToggleExpanded = {
                                         collapsedCategoryIds =
@@ -265,7 +267,9 @@ private fun SelectionActions(onSelectAll: () -> Unit, onClear: () -> Unit) {
             "Categories",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier
+                .weight(1f)
+                .semantics { heading() }
         )
         TextButton(onClick = onSelectAll) { Text("Select all") }
         TextButton(onClick = onClear) { Text("Clear") }
@@ -280,7 +284,7 @@ private fun CategoryRow(
     selected: Boolean,
     collapsed: Boolean,
     count: String,
-    error: String?,
+    countError: String?,
     onToggle: () -> Unit,
     onToggleExpanded: () -> Unit,
     onCountChange: (String) -> Unit
@@ -381,12 +385,14 @@ private fun CategoryRow(
                 OutlinedTextField(
                     value = count,
                     onValueChange = onCountChange,
-                    modifier = Modifier.width(104.dp),
+                    modifier = Modifier
+                        .width(104.dp)
+                        .semantics { countError?.let { error(it) } },
                     enabled = selected && hasQuestions,
                     singleLine = true,
-                    isError = error != null,
+                    isError = countError != null,
                     label = { Text("Count") },
-                    supportingText = error?.let { message ->
+                    supportingText = countError?.let { message ->
                         { Text(message) }
                     },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
@@ -450,6 +456,9 @@ private fun TestSummaryBar(
                 Text(
                     text = hint,
                     style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.semantics {
+                        if (summary.countErrors.isNotEmpty()) error(hint)
+                    },
                     color = if (summary.countErrors.isNotEmpty()) {
                         MaterialTheme.colorScheme.error
                     } else {

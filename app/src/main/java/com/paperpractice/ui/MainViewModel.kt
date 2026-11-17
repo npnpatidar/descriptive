@@ -19,6 +19,7 @@ import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.paperpractice.data.AppDatabase
+import com.paperpractice.data.CategoryDetail
 import com.paperpractice.data.ImportConflict
 import com.paperpractice.data.ImportMode
 import com.paperpractice.data.ImportedPaper
@@ -60,6 +61,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -229,6 +231,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var paperLoadJob: Job? = null
     private var paperLoadGeneration = 0
+    private var refreshGeneration = 0
     private var pendingExport: PendingExport? = null
     private var pendingImportContents: List<PaperContent>? = null
     private var pendingBackup: PendingBackup? = null
@@ -497,10 +500,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 if (selectedId != null) {
                     if (imported.any { it.id == selectedId }) {
-                        // A merge can add categories/questions to the paper
-                        // that is currently open. Refresh it so returning to
-                        // that paper never shows stale content.
-                        refreshSelectedPaper(selectedId)
+                        // A merge can add categories/questions and replace
+                        // images in the paper that is currently open. Reload
+                        // with bytes so returning to that paper never shows
+                        // stale content.
+                        refreshSelectedPaper(selectedId, forceImageReload = true)
                     } else if (mode == ImportMode.REPLACE) {
                         selectedPaper = null
                         selectedCategoryIds = emptySet()
@@ -684,29 +688,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (isPreparingBackup) return null
         isPreparingBackup = true
         try {
-            val contents = try {
+            // Render the whole backup into a private cache file first. Only a
+            // small filename/path is kept in state, never the full JSON text.
+            val prepared = try {
                 withContext(Dispatchers.IO) {
                     val papers = repository.getAllPapers()
                         .map(ExportContentBuilder::entirePaper)
-                    if (papers.isEmpty()) null else PaperBackup.build(papers)
+                    if (papers.isEmpty()) {
+                        null
+                    } else {
+                        val directory = backupCacheDirectory()
+                        // Supersede only the file this ViewModel still owns. A
+                        // saveBackup already in flight cleared pendingBackup,
+                        // so the file it is copying is never touched here.
+                        pendingBackup?.let { File(it.filePath).delete() }
+                        // Bound leftovers from cancelled flows, but never delete
+                        // a fresh file another operation may still be using.
+                        val staleBefore = System.currentTimeMillis() - BACKUP_STALE_MS
+                        directory.listFiles()?.forEach { old ->
+                            if (old.name.startsWith(BACKUP_FILE_PREFIX) &&
+                                old.lastModified() < staleBefore
+                            ) {
+                                old.delete()
+                            }
+                        }
+                        // Unique per prepare so two staged backups cannot share
+                        // (and delete) the same path.
+                        val fileName = BACKUP_FILE_PREFIX +
+                            SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) +
+                            "-" + UUID.randomUUID() + ".json"
+                        val file = renderToCacheFile(directory, fileName) { out ->
+                            PaperBackup.write(out, papers)
+                        }
+                        PendingBackup(fileName = fileName, filePath = file.absolutePath)
+                    }
                 }
             } catch (e: Exception) {
                 homeMessage = "Could not prepare the backup. " +
                     (e.message?.takeIf { it.isNotBlank() } ?: "Please try again.")
                 return null
             }
-            if (contents == null) {
+            if (prepared == null) {
                 homeMessage = "There are no papers to back up."
                 return null
             }
 
-            val fileName = "paper-practice-backup-" +
-                SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) + ".json"
-            pendingBackup = PendingBackup(
-                fileName = fileName,
-                contents = contents
-            )
-            return CreateDocumentRequest("application/json", fileName)
+            pendingBackup = prepared
+            return CreateDocumentRequest("application/json", prepared.fileName)
         } finally {
             isPreparingBackup = false
         }
@@ -718,23 +746,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    val resolver = getApplication<Application>().contentResolver
-                    val output = resolver.openOutputStream(uri, "wt")
-                        ?: throw IOException("The destination could not be opened.")
-                    output.use { stream ->
-                        stream.write(backup.contents.toByteArray(Charsets.UTF_8))
-                        stream.flush()
+                    val source = File(backup.filePath)
+                    if (!source.exists()) {
+                        throw IOException("The backup is no longer available.")
                     }
+                    // The payload is already complete on disk; copying it to
+                    // the picked Uri is a single bounded pass, so nothing is
+                    // written to the destination while the backup is rendered.
+                    copyToUri(source, uri)
                 }
                 homeMessage = "Backup saved as \"${backup.fileName}\"."
             } catch (e: Exception) {
                 homeMessage = "Could not save the backup. " +
                     (e.message?.takeIf { it.isNotBlank() } ?: "Please try again.")
+            } finally {
+                // Non-suspending on purpose: withContext is cancellable, so a
+                // cancelled coroutine could skip this cleanup entirely.
+                File(backup.filePath).delete()
             }
         }
     }
 
     fun cancelBackup() {
+        pendingBackup?.let { File(it.filePath).delete() }
         pendingBackup = null
     }
 
@@ -1211,17 +1245,63 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
         return try {
-            session = TestGenerator.generate(
+            val generated = TestGenerator.generate(
                 paper = paper,
                 selectedCategoryIds = selectedCategoryIds,
                 requestedCounts = counts
             )
+            val baseSession = generated
+            session = baseSession
+            // The generator copies whatever images the tree carried. Hydrate
+            // them from the database by question id so practice and "current
+            // test" export keep their images even when the tree was refreshed
+            // without BLOBs. Guard on object identity, not createdAt: an edit
+            // syncs the live session through copy(...) while keeping createdAt,
+            // so a timestamp check would still pass and restore stale text over
+            // the user's edit. Any edit also brings the tree's images along, so
+            // skipping hydration then is safe.
+            viewModelScope.launch {
+                val live = session
+                if (live !== baseSession || live?.paperId != baseSession.paperId) return@launch
+                val hydrated = withContext(Dispatchers.IO) { hydrateSessionImages(live) }
+                if (session === live && session?.paperId == baseSession.paperId) {
+                    session = hydrated
+                }
+            }
             configError = null
             true
         } catch (e: IllegalArgumentException) {
             configError = e.message ?: "Could not generate the test."
             false
         }
+    }
+
+    /** Fills a generated session's question/answer images from the database. */
+    private suspend fun hydrateSessionImages(session: TestSession): TestSession = try {
+        val images = repository.findImagesByQuestionIds(
+            session.questions.map { it.questionId }
+        )
+        session.copy(
+            questions = session.questions.map { question ->
+                val forQuestion = images[question.questionId]
+                if (forQuestion == null) {
+                    question
+                } else {
+                    question.copy(
+                        questionImages = forQuestion.questionImages,
+                        answerImages = forQuestion.answerImages
+                    )
+                }
+            }
+        )
+    } catch (e: CancellationException) {
+        // Cancellation must still cancel the coroutine, not be swallowed.
+        throw e
+    } catch (e: Exception) {
+        // Hydration is best-effort. The generator already copied the tree's
+        // bytes into the session, so failure leaves those intact instead of
+        // taking down the session or producing an uncaught exception.
+        session
     }
 
     fun dismissConfigError() {
@@ -1457,7 +1537,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         return try {
-            withContext(Dispatchers.IO) {
+            val newQuestionId = withContext(Dispatchers.IO) {
                 if (questionId == null) {
                     repository.addQuestion(
                         categoryId,
@@ -1474,9 +1554,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         questionImages,
                         answerImages
                     )
+                    null
                 }
             }
 
+            // Patch the in-memory tree BEFORE the image-free refresh. That
+            // refresh reuses bytes only for question ids already present in the
+            // old tree, so a newly added question must be inserted here with
+            // both of its supplied image lists; otherwise it would arrive empty
+            // and a later Save would delete its DB images. `updateCategory`
+            // targets the category by id at any depth, and `paper.findCategory`
+            // above already validated that id.
+            selectedPaper = selectedPaper?.updateCategory(categoryId) { target ->
+                if (questionId == null) {
+                    target.copy(
+                        questions = target.questions + QuestionDetail(
+                            id = checkNotNull(newQuestionId),
+                            questionText = questionText,
+                            answerText = answerText,
+                            questionImages = questionImages,
+                            answerImages = answerImages
+                        )
+                    )
+                } else {
+                    target.updateQuestion(questionId) { question ->
+                        question.copy(
+                            questionImages = questionImages,
+                            answerImages = answerImages
+                        )
+                    }
+                }
+            }
             refreshSelectedPaper(paper.id)
             null
         } catch (e: Exception) {
@@ -1517,10 +1625,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun refreshSelectedPaper(paperId: String) {
-        val detail = withContext(Dispatchers.IO) { repository.getPaper(paperId) } ?: return
+    private suspend fun refreshSelectedPaper(
+        paperId: String,
+        forceImageReload: Boolean = false
+    ) {
+        // Refreshes can overlap (reordering queues several, and mutations can
+        // land while one is reading). Mirror loadPaper's generation guard so a
+        // slower, older refresh cannot publish its result over a newer one.
+        val generation = ++refreshGeneration
+        val fresh = withContext(Dispatchers.IO) {
+            if (forceImageReload) {
+                repository.getPaper(paperId)
+            } else {
+                repository.getPaperTree(paperId)
+            }
+        } ?: return
+        if (generation != refreshGeneration) return
         if (selectedPaper?.id != paperId) return
 
+        // Re-read after the IO suspension: another writer may have replaced the
+        // tree while we were reading, and the carry below must use that latest
+        // in-memory state rather than a pre-IO snapshot of the bytes.
+        val previous = selectedPaper
+
+        // A structural refresh deliberately skips image BLOBs. Reuse the bytes
+        // already held for this paper so thumbnails, the editor and exports keep
+        // working without re-reading every image after each mutation. An import
+        // merge is the one case that can change images in the database itself.
+        val detail = if (!forceImageReload && previous?.id == paperId) {
+            carryImagesIntoTree(fresh, previous)
+        } else {
+            fresh
+        }
         selectedPaper = detail
         val nodes = detail.flattenCategories()
         val nodeById = nodes.associateBy { it.category.id }
@@ -1567,6 +1703,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         requestedCounts = retainedCounts
         syncSessionWithPaper(detail)
     }
+
+    /**
+     * Copies the image lists from an already loaded tree into a freshly loaded,
+     * image-free tree, matching questions by id. Text, ordering and the category
+     * structure come from the fresh tree; only image bytes are reused, so no
+     * BLOB is read from the database during a refresh.
+     */
+    private fun carryImagesIntoTree(
+        fresh: PaperDetail,
+        previous: PaperDetail
+    ): PaperDetail {
+        val oldImages = previous.flattenCategories()
+            .flatMap { it.category.questions }
+            .associateBy { it.id }
+        return fresh.copy(
+            categories = fresh.categories.map { it.copyImagesFrom(oldImages) }
+        )
+    }
+
+    private fun CategoryDetail.copyImagesFrom(
+        oldQuestions: Map<String, QuestionDetail>
+    ): CategoryDetail = copy(
+        questions = questions.map { question ->
+            oldQuestions[question.id]?.let { old ->
+                question.copy(
+                    questionImages = old.questionImages,
+                    answerImages = old.answerImages
+                )
+            } ?: question
+        },
+        children = children.map { it.copyImagesFrom(oldQuestions) }
+    )
 
     /**
      * A generated test stores a snapshot of each question and its category
@@ -1715,13 +1883,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    val resolver = getApplication<Application>().contentResolver
-                    val output = resolver.openOutputStream(uri, "wt")
-                        ?: throw IOException("The destination could not be opened.")
-                    output.use { stream ->
-                        writeExport(pending, stream)
-                        stream.flush()
-                    }
+                    // Render fully into a private cache file, verify it, then
+                    // copy to the picked Uri in one bounded pass. A failed or
+                    // cancelled render never touches the destination.
+                    renderToCacheThenCopy(
+                        fileName = pending.fileName,
+                        destination = uri,
+                        render = { out -> writeExport(pending, out) }
+                    )
                 }
 
                 exportState = ExportUiState(
@@ -1775,12 +1944,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     // Share files are only needed for the current share sheet;
                     // clear old ones so the cache does not grow without bound.
                     directory.listFiles()?.forEach { old -> old.delete() }
-                    val file = File(directory, request.fileName)
-                    file.outputStream().use { stream ->
-                        writeExport(pending, stream)
-                        stream.flush()
+                    // Render via a temp file and rename on success so a partial
+                    // write can never be handed to the share sheet.
+                    renderToCacheFile(directory, request.fileName) { out ->
+                        writeExport(pending, out)
                     }
-                    file
                 }
                 val application = getApplication<Application>()
                 val uri = FileProvider.getUriForFile(
@@ -1810,34 +1978,118 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun writeExport(pending: PendingExport, stream: OutputStream) {
+    private suspend fun writeExport(pending: PendingExport, stream: OutputStream) {
         when (pending.format) {
-            ExportFormat.HTML -> {
-                stream.write(
-                    HtmlExporter.build(pending.content, pending.includeAnswers)
-                        .toByteArray(Charsets.UTF_8)
-                )
+            ExportFormat.HTML -> HtmlExporter.write(
+                stream,
+                pending.content,
+                pending.includeAnswers
+            )
+
+            ExportFormat.DOCX -> DocxExporter.writeCancellable(
+                pending.content,
+                pending.includeAnswers,
+                pending.answersAtEnd,
+                stream
+            )
+
+            ExportFormat.PDF -> PdfExporter.writeCancellable(
+                pending.content,
+                pending.includeAnswers,
+                pending.answersAtEnd,
+                stream
+            )
+
+            ExportFormat.JSON -> JsonExporter.write(
+                stream,
+                pending.content,
+                pending.includeAnswers
+            )
+        }
+    }
+
+    /** Private cache directory used for staged backup/export payloads. */
+    private fun backupCacheDirectory(): File =
+        File(getApplication<Application>().cacheDir, BACKUP_CACHE_DIR).apply { mkdirs() }
+
+    /**
+     * Renders into a private cache file, verifies the result, then copies it to
+     * the user-picked Uri in a single bounded pass. Nothing is written to the
+     * destination until rendering has fully succeeded, and the temp file is
+     * always removed.
+     */
+    private suspend fun renderToCacheThenCopy(
+        fileName: String,
+        destination: Uri,
+        render: suspend (OutputStream) -> Unit
+    ) {
+        val directory = backupCacheDirectory()
+        // Unique temp name so concurrent operations with the same destination
+        // file name cannot overwrite each other's staged bytes. The final
+        // (share/backup) name stays deterministic.
+        val temp = File(directory, "$fileName-${UUID.randomUUID()}.tmp")
+        try {
+            temp.outputStream().use { out ->
+                render(out)
+                out.flush()
             }
+            verifyComplete(temp)
+            copyToUri(temp, destination)
+        } finally {
+            temp.delete()
+        }
+    }
 
-            ExportFormat.DOCX -> DocxExporter.write(
-                pending.content,
-                pending.includeAnswers,
-                pending.answersAtEnd,
-                stream
-            )
+    /**
+     * Renders into a temp file in [directory], verifies it, then renames it to
+     * [fileName]. Returns the completed file; the temp file is removed on any
+     * failure.
+     */
+    private suspend fun renderToCacheFile(
+        directory: File,
+        fileName: String,
+        render: suspend (OutputStream) -> Unit
+    ): File {
+        // Only the temp name is unique; `final` keeps the deterministic name
+        // used by the FileProvider URI and share title.
+        val temp = File(directory, "$fileName-${UUID.randomUUID()}.tmp")
+        val final = File(directory, fileName)
+        try {
+            temp.outputStream().use { out ->
+                render(out)
+                out.flush()
+            }
+            verifyComplete(temp)
+            if (!temp.renameTo(final)) {
+                // Some filesystems refuse a rename even within one directory.
+                temp.copyTo(final, overwrite = true)
+            }
+            return final
+        } finally {
+            temp.delete()
+        }
+    }
 
-            ExportFormat.PDF -> PdfExporter.write(
-                pending.content,
-                pending.includeAnswers,
-                pending.answersAtEnd,
-                stream
-            )
+    private fun verifyComplete(file: File) {
+        if (!file.exists() || file.length() <= 0L) {
+            throw IOException("The file could not be prepared.")
+        }
+    }
 
-            ExportFormat.JSON -> {
-                stream.write(
-                    JsonExporter.build(pending.content, pending.includeAnswers)
-                        .toByteArray(Charsets.UTF_8)
-                )
+    /** Copies a fully rendered cache file to a SAF Uri with bounded memory. */
+    private fun copyToUri(source: File, destination: Uri) {
+        val resolver = getApplication<Application>().contentResolver
+        val output = resolver.openOutputStream(destination, "wt")
+            ?: throw IOException("The destination could not be opened.")
+        output.use { stream ->
+            source.inputStream().use { input ->
+                val buffer = ByteArray(8 * 1024)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    stream.write(buffer, 0, read)
+                }
+                stream.flush()
             }
         }
     }
@@ -1894,10 +2146,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private data class PendingBackup(
         val fileName: String,
-        val contents: String
+        val filePath: String
     )
 
     private companion object {
+        const val BACKUP_CACHE_DIR = "pending-exports"
+        const val BACKUP_FILE_PREFIX = "paper-practice-backup-"
+        const val BACKUP_STALE_MS = 60 * 60 * 1000L
         const val SAMPLE_PAPER_ASSET = "sample-paper.json"
         const val SAMPLE_PAPER_ID_KEY = "sample_paper_id"
         const val MAX_IMAGE_DIMENSION = 1400

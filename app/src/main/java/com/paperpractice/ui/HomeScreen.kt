@@ -74,6 +74,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -726,7 +728,7 @@ private fun CreatePaperDialog(
 ) {
     var name by rememberSaveable { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var validationError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     AlertDialog(
@@ -744,14 +746,16 @@ private fun CreatePaperDialog(
                     value = name,
                     onValueChange = {
                         name = it
-                        error = null
+                        validationError = null
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics { validationError?.let { error(it) } },
                     label = { Text("Paper name") },
                     singleLine = true,
                     enabled = !saving,
-                    isError = error != null,
-                    supportingText = error?.let { message -> { Text(message) } }
+                    isError = validationError != null,
+                    supportingText = validationError?.let { message -> { Text(message) } }
                 )
             }
         },
@@ -760,12 +764,12 @@ private fun CreatePaperDialog(
                 enabled = name.isNotBlank() && !saving,
                 onClick = {
                     saving = true
-                    error = null
+                    validationError = null
                     scope.launch {
                         when (val result = viewModel.createPaper(name)) {
                             is CreatePaperResult.Success -> onCreated(result.paperId)
                             is CreatePaperResult.Failure -> {
-                                error = result.message
+                                validationError = result.message
                                 saving = false
                             }
                         }

@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         QuestionEntity::class,
         QuestionImageEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -59,6 +59,23 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_categories_paperId_parentId` " +
+                        "ON `categories` (`paperId`, `parentId`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_questions_categoryId_position` " +
+                        "ON `questions` (`categoryId`, `position`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_categories_paperId_position` " +
+                        "ON `categories` (`paperId`, `position`)"
+                )
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -66,7 +83,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "papers.db"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                     .also { instance = it }
             }

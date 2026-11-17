@@ -6,6 +6,9 @@ import com.paperpractice.domain.PaperContent
 import com.paperpractice.domain.PaperFormatException
 import com.paperpractice.domain.PaperJsonParser
 import com.paperpractice.domain.QuestionContent
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -228,5 +231,133 @@ class BackupAndImagesTest {
         } catch (e: PaperFormatException) {
             assertTrue(e.message.orEmpty().contains("questionImages[0].data"))
         }
+    }
+
+    @Test
+    fun `backup containing no papers is rejected`() {
+        try {
+            PaperBackup.parse(PaperBackup.build(emptyList()))
+            fail("Expected PaperFormatException")
+        } catch (e: PaperFormatException) {
+            assertTrue(e.message.orEmpty().contains("no papers", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun `backup with the next version is rejected with a clear message`() {
+        val backup = """
+            {"format":"paper-practice-backup","version":${PaperBackup.VERSION + 1},
+             "papers":[{"paperName":"P","categories":[]}]}
+        """.trimIndent()
+        try {
+            PaperBackup.parse(backup)
+            fail("Expected PaperFormatException")
+        } catch (e: PaperFormatException) {
+            val message = e.message.orEmpty()
+            assertTrue(message.contains("newer version"))
+            assertTrue(message.contains("cannot be restored"))
+        }
+    }
+
+    @Test
+    fun `restore accepts a plain paper export with nested categories`() {
+        val plain = PaperContent(
+            paperName = "Plain nested paper",
+            categories = listOf(
+                CategoryContent(
+                    categoryName = "Science",
+                    questions = emptyList(),
+                    categories = listOf(
+                        CategoryContent(
+                            categoryName = "Physics",
+                            questions = listOf(
+                                QuestionContent("Q1", "A1"),
+                                QuestionContent("Q2", "A2")
+                            )
+                        )
+                    )
+                ),
+                CategoryContent(
+                    categoryName = "Arts",
+                    questions = listOf(QuestionContent("Q3", "A3"))
+                )
+            )
+        )
+
+        val restored = PaperBackup.parse(JsonExporter.build(plain, includeAnswers = true))
+
+        assertEquals(1, restored.size)
+        assertEquals("Plain nested paper", restored.single().paperName)
+        assertEquals(3, restored.single().questionCount)
+        assertEquals("Science", restored.single().categories[0].categoryName)
+        assertEquals(
+            listOf("Q1", "Q2"),
+            restored.single().categories[0].categories.single().questions.map {
+                it.questionText
+            }
+        )
+        assertEquals("Q3", restored.single().categories[1].questions.single().questionText)
+    }
+
+    @Test
+    fun `backup round trip preserves every paper name and question`() {
+        val papers = listOf(
+            PaperContent(
+                paperName = "First",
+                categories = listOf(
+                    CategoryContent(
+                        "C1",
+                        listOf(QuestionContent("Q1", "A1"), QuestionContent("Q2", "A2"))
+                    )
+                )
+            ),
+            PaperContent(
+                paperName = "Second",
+                categories = listOf(
+                    CategoryContent("C2", listOf(QuestionContent("Q3", "A3")))
+                )
+            ),
+            PaperContent(
+                paperName = "Third",
+                categories = listOf(CategoryContent("C3", emptyList()))
+            )
+        )
+
+        val restored = PaperBackup.parse(PaperBackup.build(papers))
+
+        assertEquals(papers.size, restored.size)
+        assertEquals(listOf("First", "Second", "Third"), restored.map { it.paperName })
+        assertEquals(
+            listOf(listOf("Q1", "Q2"), listOf("Q3"), emptyList<String>()),
+            restored.map { paper ->
+                paper.categories.single().questions.map { it.questionText }
+            }
+        )
+        assertEquals(
+            listOf("A1", "A2"),
+            restored[0].categories.single().questions.map { it.answerText }
+        )
+    }
+
+    @Test
+    fun `backup write matches build apart from the timestamp`() {
+        val papers = listOf(
+            paper(),
+            PaperContent("Second", listOf(CategoryContent("Empty", emptyList())))
+        )
+        val fromBuild = PaperBackup.build(papers)
+        val fromWrite = ByteArrayOutputStream().also {
+            PaperBackup.write(it, papers)
+        }.toString(Charsets.UTF_8)
+
+        // Both paths stamp exportedAt with the current time, so compare the
+        // decoded objects with that one field removed.
+        fun withoutTimestamp(json: String): JsonObject = JsonObject(
+            Json.parseToJsonElement(json).jsonObject.filterKeys { it != "exportedAt" }
+        )
+        assertEquals(withoutTimestamp(fromBuild), withoutTimestamp(fromWrite))
+
+        assertEquals(2, PaperBackup.parse(fromBuild).size)
+        assertEquals(2, PaperBackup.parse(fromWrite).size)
     }
 }

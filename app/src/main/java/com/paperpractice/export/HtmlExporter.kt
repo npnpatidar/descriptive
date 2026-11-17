@@ -7,6 +7,7 @@ import com.paperpractice.domain.RichBlock
 import com.paperpractice.domain.RichDocument
 import com.paperpractice.domain.RichInline
 import com.paperpractice.domain.RichText
+import java.io.OutputStream
 import java.util.Base64
 
 /**
@@ -15,7 +16,30 @@ import java.util.Base64
  */
 object HtmlExporter {
 
-    fun build(content: PaperContent, includeAnswers: Boolean): String {
+    /** Kept for tests and callers that need the in-memory text. */
+    fun build(content: PaperContent, includeAnswers: Boolean): String = buildString {
+        renderHtml(content, includeAnswers)
+    }
+
+    /**
+     * Streams the document through a UTF-8 writer so the whole page (embedded
+     * images included) is never held as one String plus a second byte array.
+     * The caller owns the stream.
+     */
+    fun write(output: OutputStream, content: PaperContent, includeAnswers: Boolean) {
+        val writer = output.bufferedWriter(Charsets.UTF_8)
+        writer.renderHtml(content, includeAnswers)
+        writer.flush()
+    }
+
+    // StringBuilder.appendLine uses the platform line separator; HTML output
+    // always uses "\n" so the bytes are identical on every host.
+    private fun Appendable.appendLine(value: String) {
+        append(value)
+        append('\n')
+    }
+
+    private fun Appendable.renderHtml(content: PaperContent, includeAnswers: Boolean) {
         val answerCount = content.questionCount
         val totalLabel = if (answerCount == 1) "1 question" else "$answerCount questions"
         val categoryCount = content.categoryCount
@@ -25,101 +49,99 @@ object HtmlExporter {
             "$categoryCount categories"
         }
 
-        return buildString {
-            var number = 1
+        var number = 1
 
-            fun appendCategory(
-                category: com.paperpractice.domain.CategoryContent,
-                parentPath: List<String>,
-                headingDepth: Int
-            ) {
-                val path = parentPath + category.categoryName
-                if (category.questions.isNotEmpty()) {
-                    appendLine("<section class=\"category\">")
-                    val headingLevel = (headingDepth + 2).coerceAtMost(6)
-                    appendLine(
-                        "<h$headingLevel>${escape(categoryExportName(parentPath, category.categoryName))}" +
-                            "</h$headingLevel>"
-                    )
-                    category.questions.forEach { question ->
-                        appendLine("<article class=\"question\">")
-                        appendLine("<div class=\"question-heading\">")
-                        appendLine("<span class=\"number\">$number</span>")
-                        appendLine(
-                            "<div class=\"question-text\">${richHtml(question.questionText)}</div>"
-                        )
-                        appendLine("</div>")
-                        question.questionImages.forEach { image ->
-                            appendLine(imageTag(image, "question-image"))
-                        }
-                        if (includeAnswers) {
-                            appendLine("<div class=\"answer\" hidden>")
-                            appendLine("<span class=\"answer-label\">Answer</span>")
-                            val answer = if (question.answerText.isBlank()) {
-                                "<span class=\"empty-answer\">(No answer provided)</span>"
-                            } else {
-                                richHtml(question.answerText)
-                            }
-                            appendLine("<div class=\"answer-text\">$answer</div>")
-                            question.answerImages.forEach { image ->
-                                appendLine(imageTag(image, "answer-image"))
-                            }
-                            appendLine("</div>")
-                        }
-                        appendLine("</article>")
-                        number++
-                    }
-                    appendLine("</section>")
-                }
-
-                val childHeadingDepth = if (category.questions.isNotEmpty()) {
-                    headingDepth + 1
-                } else {
-                    headingDepth
-                }
-                category.categories.forEach { child ->
-                    appendCategory(child, path, childHeadingDepth)
-                }
-            }
-
-            appendLine("<!DOCTYPE html>")
-            appendLine("<html lang=\"en\">")
-            appendLine("<head>")
-            appendLine("<meta charset=\"utf-8\">")
-            appendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">")
-            appendLine("<title>${escape(content.paperName)}</title>")
-            appendLine("<style>")
-            appendLine(CSS.trimIndent())
-            appendLine("</style>")
-            appendLine("</head>")
-            appendLine("<body>")
-            appendLine("<header class=\"paper-header\">")
-            appendLine("<p class=\"eyebrow\">Practice paper</p>")
-            appendLine("<h1>${escape(content.paperName)}</h1>")
-            appendLine("<p class=\"meta\">$categoryLabel &middot; $totalLabel</p>")
-            if (includeAnswers) {
+        fun appendCategory(
+            category: com.paperpractice.domain.CategoryContent,
+            parentPath: List<String>,
+            headingDepth: Int
+        ) {
+            val path = parentPath + category.categoryName
+            if (category.questions.isNotEmpty()) {
+                appendLine("<section class=\"category\">")
+                val headingLevel = (headingDepth + 2).coerceAtMost(6)
                 appendLine(
-                    "<div class=\"toolbar\"><button type=\"button\" id=\"toggleAnswers\" " +
-                        "aria-controls=\"question-list\">Show Answers</button></div>"
+                    "<h$headingLevel>${escape(categoryExportName(parentPath, category.categoryName))}" +
+                        "</h$headingLevel>"
                 )
+                category.questions.forEach { question ->
+                    appendLine("<article class=\"question\">")
+                    appendLine("<div class=\"question-heading\">")
+                    appendLine("<span class=\"number\">$number</span>")
+                    appendLine(
+                        "<div class=\"question-text\">${richHtml(question.questionText)}</div>"
+                    )
+                    appendLine("</div>")
+                    question.questionImages.forEach { image ->
+                        appendLine(imageTag(image, "question-image"))
+                    }
+                    if (includeAnswers) {
+                        appendLine("<div class=\"answer\" hidden>")
+                        appendLine("<span class=\"answer-label\">Answer</span>")
+                        val answer = if (question.answerText.isBlank()) {
+                            "<span class=\"empty-answer\">(No answer provided)</span>"
+                        } else {
+                            richHtml(question.answerText)
+                        }
+                        appendLine("<div class=\"answer-text\">$answer</div>")
+                        question.answerImages.forEach { image ->
+                            appendLine(imageTag(image, "answer-image"))
+                        }
+                        appendLine("</div>")
+                    }
+                    appendLine("</article>")
+                    number++
+                }
+                appendLine("</section>")
             }
-            appendLine("</header>")
-            appendLine("<main id=\"question-list\">")
 
-            content.categories.forEach { category ->
-                appendCategory(category, emptyList(), 0)
+            val childHeadingDepth = if (category.questions.isNotEmpty()) {
+                headingDepth + 1
+            } else {
+                headingDepth
             }
-
-            appendLine("</main>")
-            appendLine("<footer>Generated offline by Paper Practice.</footer>")
-            if (includeAnswers) {
-                appendLine("<script>")
-                appendLine(SCRIPT.trimIndent())
-                appendLine("</script>")
+            category.categories.forEach { child ->
+                appendCategory(child, path, childHeadingDepth)
             }
-            appendLine("</body>")
-            appendLine("</html>")
         }
+
+        appendLine("<!DOCTYPE html>")
+        appendLine("<html lang=\"en\">")
+        appendLine("<head>")
+        appendLine("<meta charset=\"utf-8\">")
+        appendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">")
+        appendLine("<title>${escape(content.paperName)}</title>")
+        appendLine("<style>")
+        appendLine(CSS.trimIndent())
+        appendLine("</style>")
+        appendLine("</head>")
+        appendLine("<body>")
+        appendLine("<header class=\"paper-header\">")
+        appendLine("<p class=\"eyebrow\">Practice paper</p>")
+        appendLine("<h1>${escape(content.paperName)}</h1>")
+        appendLine("<p class=\"meta\">$categoryLabel &middot; $totalLabel</p>")
+        if (includeAnswers) {
+            appendLine(
+                "<div class=\"toolbar\"><button type=\"button\" id=\"toggleAnswers\" " +
+                    "aria-controls=\"question-list\">Show Answers</button></div>"
+            )
+        }
+        appendLine("</header>")
+        appendLine("<main id=\"question-list\">")
+
+        content.categories.forEach { category ->
+            appendCategory(category, emptyList(), 0)
+        }
+
+        appendLine("</main>")
+        appendLine("<footer>Generated offline by Paper Practice.</footer>")
+        if (includeAnswers) {
+            appendLine("<script>")
+            appendLine(SCRIPT.trimIndent())
+            appendLine("</script>")
+        }
+        appendLine("</body>")
+        appendLine("</html>")
     }
 
     private fun richHtml(value: String): String = renderDocument(RichText.parse(value))

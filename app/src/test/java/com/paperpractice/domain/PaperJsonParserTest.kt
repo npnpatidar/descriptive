@@ -276,6 +276,85 @@ class PaperJsonParserTest {
         assertEquals(480, image.height)
     }
 
+    @Test
+    fun duplicateKeysUseTheLastValueForValidation() {
+        // kotlinx-serialization 1.13.0 parses objects into a LinkedHashMap via
+        // `result[key] = element`, so a repeated key resolves to its last value.
+        // https://github.com/Kotlin/kotlinx.serialization/blob/v1.13.0/formats/json/commonMain/src/kotlinx/serialization/json/internal/JsonTreeReader.kt
+        val paper = PaperJsonParser.parse(
+            """{"paperName":"First","paperName":"Final","categories":[]}"""
+        )
+        assertEquals("Final", paper.paperName)
+
+        // Validation must run on the resolved value, not on the earlier duplicate.
+        val message = failureMessage(
+            """{"paperName":"Valid","paperName":"   ","categories":[]}"""
+        )
+        assertTrue(message.contains("paperName"))
+        assertTrue(message.contains("empty"))
+    }
+
+    @Test
+    fun decodesUnicodeEscapesInNamesAndAnswers() {
+        // Build the backslash at runtime so the Kotlin lexer cannot consume the
+        // JSON escape sequences in this source file before the parser sees them.
+        val slash = "\\"
+        val json = "{" +
+            "\"paperName\":\"P${slash}u0061per ${slash}u00e9\"," +
+            "\"categories\":[{" +
+            "\"categoryName\":\"C${slash}u03b1\"," +
+            "\"questions\":[{" +
+            "\"questionText\":\"Q ${slash}u0031\"," +
+            "\"answerText\":\"A ${slash}u2603\"" +
+            "}]}]}"
+
+        val paper = PaperJsonParser.parse(json)
+        val question = paper.categories.single().questions.single()
+
+        assertEquals("Paper é", paper.paperName)
+        assertEquals("Cα", paper.categories.single().categoryName)
+        assertEquals("Q 1", question.questionText)
+        assertEquals("A ☃", question.answerText)
+    }
+
+    @Test
+    fun acceptsVeryLongQuestionAndAnswerText() {
+        val questionText = "Q".repeat(100_000)
+        val answerText = "A".repeat(100_000)
+        val json = "{\"paperName\":\"Long\",\"categories\":[{" +
+            "\"categoryName\":\"C\",\"questions\":[{" +
+            "\"questionText\":\"$questionText\",\"answerText\":\"$answerText\"" +
+            "}]}]}"
+
+        val question = PaperJsonParser.parse(json).categories.single().questions.single()
+
+        assertEquals(questionText, question.questionText)
+        assertEquals(answerText, question.answerText)
+        assertEquals(100_000, question.questionText.length)
+    }
+
+    @Test
+    fun rejectsImageDimensionsOutsideZeroTo100000() {
+        val bytes = byteArrayOf(1, 2, 3, 4, 5, 6)
+
+        val tooWide = failureMessage(imageJson(bytes, 100_001, 10))
+        assertTrue(tooWide.contains("questionImages[0].width must be between 0 and 100000"))
+
+        val negativeWidth = failureMessage(imageJson(bytes, -1, 10))
+        assertTrue(negativeWidth.contains("questionImages[0].width must be between 0 and 100000"))
+
+        val tooTall = failureMessage(imageJson(bytes, 10, 100_001))
+        assertTrue(tooTall.contains("questionImages[0].height must be between 0 and 100000"))
+    }
+
+    @Test
+    fun acceptsImageDimensionsAtTheUpperBound() {
+        val image = parseImage(imageJson(byteArrayOf(1, 2, 3, 4, 5, 6), 100_000, 100_000))
+
+        assertEquals(100_000, image.width)
+        assertEquals(100_000, image.height)
+    }
+
     private fun nestedCategoryPaper(levels: Int): String {
         var category = """{"categoryName":"C","questions":[]}"""
         repeat(levels - 1) {

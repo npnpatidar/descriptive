@@ -9,6 +9,12 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 
+/** The two image sets of one question, loaded on demand from the database. */
+data class QuestionImageSet(
+    val questionImages: List<ImageContent> = emptyList(),
+    val answerImages: List<ImageContent> = emptyList()
+)
+
 class PaperRepository(private val database: AppDatabase) {
 
     private val dao = database.paperDao()
@@ -296,14 +302,6 @@ class PaperRepository(private val database: AppDatabase) {
             emptyMap()
         }
 
-        fun imageContent(image: QuestionImageEntity): ImageContent = ImageContent(
-            id = image.id,
-            mimeType = image.mimeType,
-            width = image.width,
-            height = image.height,
-            bytes = image.data
-        )
-
         fun buildCategory(entity: CategoryEntity): CategoryDetail = CategoryDetail(
             id = entity.id,
             name = entity.name,
@@ -317,10 +315,10 @@ class PaperRepository(private val database: AppDatabase) {
                         answerText = question.answerText,
                         questionImages = images
                             .filter { it.target == TARGET_QUESTION }
-                            .map(::imageContent),
+                            .map { it.toImageContent() },
                         answerImages = images
                             .filter { it.target == TARGET_ANSWER }
-                            .map(::imageContent)
+                            .map { it.toImageContent() }
                     )
                 },
             children = categoriesByParent[entity.id]
@@ -334,6 +332,57 @@ class PaperRepository(private val database: AppDatabase) {
             categories = categoriesByParent[null].orEmpty().map(::buildCategory)
         )
     }
+
+    /**
+     * Loads only the paper's structure (categories, question text and answers),
+     * without reading any image BLOBs. Use this for refreshes and other places
+     * that do not display or export image bytes; hydrate images on demand with
+     * [findImagesByQuestionIds] when they are actually needed.
+     */
+    suspend fun getPaperTree(paperId: String): PaperDetail? =
+        getPaper(paperId, includeImages = false)
+
+    /**
+     * Reads image bytes for an explicit set of questions, grouped by question
+     * id and target. The result can be merged into a tree loaded with
+     * [getPaperTree] to hydrate only the questions being viewed.
+     *
+     * Room expands a collection parameter into one host parameter per element,
+     * and SQLite on older supported devices caps those at 999. Ids are queried
+     * in bounded batches and merged in input order.
+     */
+    suspend fun findImagesByQuestionIds(
+        questionIds: Collection<String>
+    ): Map<String, QuestionImageSet> {
+        val ids = questionIds.distinct()
+        if (ids.isEmpty()) return emptyMap()
+        val result = linkedMapOf<String, QuestionImageSet>()
+        ids.chunked(IMAGE_ID_QUERY_BATCH_SIZE).forEach { batch ->
+            dao.findImagesByQuestionIds(batch)
+                .groupBy { it.questionId }
+                .forEach { (questionId, images) ->
+                    // Ids are distinct, so every question's rows come from a
+                    // single batch and no per-question merge is necessary.
+                    result[questionId] = QuestionImageSet(
+                        questionImages = images
+                            .filter { it.target == TARGET_QUESTION }
+                            .map { it.toImageContent() },
+                        answerImages = images
+                            .filter { it.target == TARGET_ANSWER }
+                            .map { it.toImageContent() }
+                    )
+                }
+        }
+        return result
+    }
+
+    private fun QuestionImageEntity.toImageContent(): ImageContent = ImageContent(
+        id = id,
+        mimeType = mimeType,
+        width = width,
+        height = height,
+        bytes = data
+    )
 
     suspend fun getAllPapers(): List<PaperDetail> = database.withTransaction {
         dao.findPapers().mapNotNull { getPaper(it.id) }
@@ -776,5 +825,7 @@ class PaperRepository(private val database: AppDatabase) {
     private companion object {
         const val TARGET_QUESTION = "QUESTION"
         const val TARGET_ANSWER = "ANSWER"
+        // Below the 999 host-parameter limit of older SQLite versions.
+        const val IMAGE_ID_QUERY_BATCH_SIZE = 900
     }
 }
