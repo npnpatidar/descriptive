@@ -49,7 +49,7 @@ domain-specific.
   reviewers (design/domain, implementation/integration, tests/docs) for anything
   significant — a domain rule, the database schema, a backup or export format,
   or first-run defaults.
--  Maximum 3 Subagents can  run in parallel.
+-  Maximum 10 Subagents can  run in parallel.
 - **A subagent killed by a provider quota error is retried, not abandoned.** Try
   once to continue the same session (call `subagent` with its `sessionID` and the
   full remaining brief); if that session dies again, launch a **fresh** subagent
