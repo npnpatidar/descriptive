@@ -15,6 +15,7 @@ private object Routes {
     const val QUESTIONS = "questions/{paperId}"
     const val PRACTICE = "practice"
     const val EXPORT = "export"
+    const val TAGS = "tags"
 
     fun configure(paperId: String): String = "configure/${Uri.encode(paperId)}"
     fun questions(paperId: String): String = "questions/${Uri.encode(paperId)}"
@@ -43,6 +44,11 @@ fun PaperPracticeApp(viewModel: MainViewModel) {
                 },
                 onSearch = {
                     navController.navigate(Routes.SEARCH) {
+                        launchSingleTop = true
+                    }
+                },
+                onManageTags = {
+                    navController.navigate(Routes.TAGS) {
                         launchSingleTop = true
                     }
                 }
@@ -126,6 +132,13 @@ fun PaperPracticeApp(viewModel: MainViewModel) {
 
         composable(Routes.EXPORT) {
             ExportScreen(
+                viewModel = viewModel,
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(Routes.TAGS) {
+            TagsScreen(
                 viewModel = viewModel,
                 onBack = { navController.popBackStack() }
             )

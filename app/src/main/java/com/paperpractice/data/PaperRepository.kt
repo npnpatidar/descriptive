@@ -8,6 +8,17 @@ import java.util.UUID
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+
+/** NFC + lowercase identity shared by the tag library, importer and editor. */
+internal fun normalizeTagKey(value: String): String =
+    java.text.Normalizer.normalize(
+        value.trim(),
+        java.text.Normalizer.Form.NFC
+    ).lowercase()
+
+/** A question may carry at most this many distinct tags (matches the parser). */
+internal const val MAX_QUESTION_TAGS = 20
 
 /** The two image sets of one question, loaded on demand from the database. */
 data class QuestionImageSet(
@@ -20,6 +31,76 @@ class PaperRepository(private val database: AppDatabase) {
     private val dao = database.paperDao()
 
     fun observePapers(): Flow<List<PaperSummary>> = dao.observePaperSummaries()
+
+    // ---- Global tag library -------------------------------------------------
+
+    /** Live view of every tag, ordered by normalized name. */
+    fun observeTags(): Flow<List<Tag>> = dao.observeTags().map { tags ->
+        tags.map { it.toTag() }
+    }
+
+    suspend fun getTags(): List<Tag> = dao.findTags().map { it.toTag() }
+
+    /**
+     * Creates a tag, or returns null when the name is blank, over 40 chars,
+     * contains a CR/LF, or duplicates an existing tag ignoring case.
+     */
+    suspend fun createTag(name: String): Tag? = database.withTransaction {
+        val parts = validTagName(name) ?: return@withTransaction null
+        if (dao.findTagByNormalizedName(parts.normalizedName) != null) {
+            return@withTransaction null
+        }
+        val entity = TagEntity(
+            id = UUID.randomUUID().toString(),
+            name = parts.name,
+            normalizedName = parts.normalizedName
+        )
+        dao.insertTag(entity)
+        entity.toTag()
+    }
+
+    /** Returns false on an invalid/duplicate name or a missing tag. */
+    suspend fun renameTag(tagId: String, newName: String): Boolean =
+        database.withTransaction {
+            val parts = validTagName(newName) ?: return@withTransaction false
+            if (dao.findTagById(tagId) == null) return@withTransaction false
+            val clash = dao.findTagByNormalizedName(parts.normalizedName)
+            if (clash != null && clash.id != tagId) return@withTransaction false
+            dao.updateTag(tagId, parts.name, parts.normalizedName) == 1
+        }
+
+    /** Returns true when a tag was actually removed. */
+    suspend fun deleteTag(tagId: String): Boolean = database.withTransaction {
+        dao.deleteTag(tagId) == 1
+    }
+
+    /**
+     * Moves every link from the source tag to the target (dropping duplicates
+     * first), then removes the source tag. Refuses a missing source/target or
+     * a self-merge. Multi-step, so it runs in one transaction.
+     */
+    suspend fun mergeTags(sourceTagId: String, targetTagId: String): Boolean =
+        database.withTransaction {
+            if (sourceTagId == targetTagId) return@withTransaction false
+            if (dao.findTagById(sourceTagId) == null) return@withTransaction false
+            if (dao.findTagById(targetTagId) == null) return@withTransaction false
+            dao.deleteDuplicateTagLinks(sourceTagId, targetTagId)
+            dao.reassignTagLinks(sourceTagId, targetTagId)
+            dao.deleteTag(sourceTagId)
+            true
+        }
+
+    /** Deletes every tag with no question links and returns how many were removed. */
+    suspend fun clearUnusedTags(): Int = database.withTransaction {
+        dao.deleteUnusedTags()
+    }
+
+    /** Replaces a question's links with the distinct set of valid tag ids. */
+    suspend fun setQuestionTags(questionId: String, tagIds: Set<String>) {
+        database.withTransaction {
+            replaceQuestionTagLinks(questionId, tagIds)
+        }
+    }
 
     /**
      * Copies a validated paper into the local database in one transaction.
@@ -112,6 +193,7 @@ class PaperRepository(private val database: AppDatabase) {
         val categories = mutableListOf<CategoryEntity>()
         val questions = mutableListOf<QuestionEntity>()
         val images = mutableListOf<QuestionImageEntity>()
+        val tagsByQuestion = mutableMapOf<String, List<String>>()
 
         fun addCategories(
             source: List<CategoryContent>,
@@ -135,6 +217,7 @@ class PaperRepository(private val database: AppDatabase) {
                         answerText = question.answerText,
                         position = questionIndex
                     )
+                    tagsByQuestion[questionId] = question.tags
                     images += question.questionImages.toImageEntities(
                         questionId,
                         TARGET_QUESTION
@@ -161,6 +244,7 @@ class PaperRepository(private val database: AppDatabase) {
         if (categories.isNotEmpty()) dao.insertCategories(categories)
         if (questions.isNotEmpty()) dao.insertQuestions(questions)
         if (images.isNotEmpty()) dao.insertQuestionImages(images)
+        linkTagsForQuestions(tagsByQuestion)
 
         return paperId
     }
@@ -171,6 +255,8 @@ class PaperRepository(private val database: AppDatabase) {
      * replaced when the incoming answer is not blank.
      */
     private suspend fun mergeContentIntoPaper(paperId: String, content: PaperContent) {
+        val tagsByQuestion = mutableMapOf<String, List<String>>()
+
         suspend fun mergeCategory(source: CategoryContent, parentId: String?) {
             val siblings = dao.findCategoriesByParent(paperId, parentId)
             val existing = siblings.firstOrNull {
@@ -204,12 +290,24 @@ class PaperRepository(private val database: AppDatabase) {
                     )
                     dao.insertQuestion(entity)
                     existingQuestions += entity
+                    tagsByQuestion[questionId] = question.tags
                     val images = question.questionImages.toImageEntities(
                         questionId,
                         TARGET_QUESTION
                     ) + question.answerImages.toImageEntities(questionId, TARGET_ANSWER)
                     if (images.isNotEmpty()) dao.insertQuestionImages(images)
                 } else {
+                    // MERGE never removes existing links: inserting with IGNORE
+                    // unions the incoming names with the matched question's tags.
+                    val mergedNames =
+                        tagsByQuestion.getOrPut(match.id) { emptyList() } + question.tags
+                    val distinctKeys = mergedNames.mapNotNull {
+                        validTagName(it)?.normalizedName
+                    }.toSet()
+                    if (distinctKeys.size > MAX_QUESTION_TAGS) {
+                        throw IllegalArgumentException("A question can have at most 20 tags.")
+                    }
+                    tagsByQuestion[match.id] = mergedNames
                     if (question.answerText.isNotBlank() &&
                         match.answerText != question.answerText
                     ) {
@@ -230,6 +328,12 @@ class PaperRepository(private val database: AppDatabase) {
         }
 
         content.categories.forEach { mergeCategory(it, null) }
+        // A MERGE unions incoming names with the links a matched question
+        // already has. Validate that true post-merge result before writing any
+        // link, so a question never ends up with more tags than the parser
+        // accepts (which would make its own JSON/backups unreadable).
+        validateMergedTagCounts(tagsByQuestion)
+        linkTagsForQuestions(tagsByQuestion)
     }
 
     suspend fun createPaper(name: String): PaperDetail = database.withTransaction {
@@ -301,6 +405,10 @@ class PaperRepository(private val database: AppDatabase) {
         } else {
             emptyMap()
         }
+        // One batched query for the whole paper, never one query per question.
+        val tagsByQuestion = findTagNamesByQuestionIds(
+            questionsByCategory.values.flatten().map { it.id }
+        )
 
         fun buildCategory(entity: CategoryEntity): CategoryDetail = CategoryDetail(
             id = entity.id,
@@ -318,7 +426,8 @@ class PaperRepository(private val database: AppDatabase) {
                             .map { it.toImageContent() },
                         answerImages = images
                             .filter { it.target == TARGET_ANSWER }
-                            .map { it.toImageContent() }
+                            .map { it.toImageContent() },
+                        tags = tagsByQuestion[question.id].orEmpty()
                     )
                 },
             children = categoriesByParent[entity.id]
@@ -357,7 +466,7 @@ class PaperRepository(private val database: AppDatabase) {
         val ids = questionIds.distinct()
         if (ids.isEmpty()) return emptyMap()
         val result = linkedMapOf<String, QuestionImageSet>()
-        ids.chunked(IMAGE_ID_QUERY_BATCH_SIZE).forEach { batch ->
+        ids.chunked(ID_QUERY_BATCH_SIZE).forEach { batch ->
             dao.findImagesByQuestionIds(batch)
                 .groupBy { it.questionId }
                 .forEach { (questionId, images) ->
@@ -376,6 +485,29 @@ class PaperRepository(private val database: AppDatabase) {
         return result
     }
 
+    /**
+     * Tag display names for an explicit set of questions, grouped by question
+     * and sorted case-insensitively. Uses the same bounded batching as the
+     * image lookup so a large paper never triggers an N+1 query per question.
+     */
+    suspend fun findTagNamesByQuestionIds(
+        questionIds: Collection<String>
+    ): Map<String, List<String>> {
+        val ids = questionIds.distinct()
+        if (ids.isEmpty()) return emptyMap()
+        val result = linkedMapOf<String, List<String>>()
+        ids.chunked(ID_QUERY_BATCH_SIZE).forEach { batch ->
+            dao.findTagRowsByQuestionIds(batch)
+                .groupBy { it.questionId }
+                .forEach { (questionId, rows) ->
+                    result[questionId] = rows
+                        .map { it.name }
+                        .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it })
+                }
+        }
+        return result
+    }
+
     private fun QuestionImageEntity.toImageContent(): ImageContent = ImageContent(
         id = id,
         mimeType = mimeType,
@@ -388,9 +520,22 @@ class PaperRepository(private val database: AppDatabase) {
         dao.findPapers().mapNotNull { getPaper(it.id) }
     }
 
-    suspend fun search(rawQuery: String, limit: Int = 80): List<SearchHit> {
+    suspend fun search(
+        rawQuery: String,
+        limit: Int = 80,
+        tagIds: Set<String> = emptySet()
+    ): List<SearchHit> {
         val query = rawQuery.trim()
         if (query.isEmpty()) return emptyList()
+
+        // QuestionDetail carries tag display names, so resolve the selected ids
+        // to normalized names once and compare those. Tag ids are an
+        // include-only filter on QUESTION hits: paper/category hits are left
+        // untouched, and a question must carry at least one selected tag.
+        val selectedTagNames = findTagsByIds(tagIds).mapTo(linkedSetOf<String>()) {
+            it.name.tagKey()
+        }
+        val tagFilterActive = tagIds.isNotEmpty()
 
         val hits = mutableListOf<SearchHit>()
         dao.findPapers().forEach { paperEntity ->
@@ -430,9 +575,14 @@ class PaperRepository(private val database: AppDatabase) {
                 }
 
                 node.category.questions.forEach { question ->
-                    if (question.questionText.contains(query, ignoreCase = true) ||
+                    val textMatches = question.questionText.contains(query, ignoreCase = true) ||
                         question.answerText.contains(query, ignoreCase = true)
-                    ) {
+                    val tagNameMatches = question.tags.any {
+                        it.contains(query, ignoreCase = true)
+                    }
+                    val carriesSelected = !tagFilterActive ||
+                        question.tags.any { it.tagKey() in selectedTagNames }
+                    if ((textMatches || tagNameMatches) && carriesSelected) {
                         hits += SearchHit(
                             kind = SearchHitKind.QUESTION,
                             paperId = paper.id,
@@ -472,7 +622,8 @@ class PaperRepository(private val database: AppDatabase) {
         questionText: String,
         answerText: String,
         questionImages: List<ImageContent>? = null,
-        answerImages: List<ImageContent>? = null
+        answerImages: List<ImageContent>? = null,
+        tagIds: Set<String> = emptySet()
     ): String = database.withTransaction {
         val updated = dao.updateQuestion(questionId, questionText, answerText)
         check(updated == 1) { "The question could not be found. It may have been deleted." }
@@ -482,6 +633,11 @@ class PaperRepository(private val database: AppDatabase) {
         if (answerImages != null) {
             replaceImages(questionId, TARGET_ANSWER, answerImages)
         }
+        // An empty set means "not supplied" here, so an existing-tag-free edit
+        // never wipes tags. Use setQuestionTags(id, emptySet()) to clear them.
+        if (tagIds.isNotEmpty()) {
+            replaceQuestionTagLinks(questionId, tagIds)
+        }
         questionId
     }
 
@@ -490,7 +646,8 @@ class PaperRepository(private val database: AppDatabase) {
         questionText: String,
         answerText: String,
         questionImages: List<ImageContent> = emptyList(),
-        answerImages: List<ImageContent> = emptyList()
+        answerImages: List<ImageContent> = emptyList(),
+        tagIds: Set<String> = emptySet()
     ): String = database.withTransaction {
         val questionId = UUID.randomUUID().toString()
         dao.insertQuestion(
@@ -505,6 +662,7 @@ class PaperRepository(private val database: AppDatabase) {
         val images = questionImages.toImageEntities(questionId, TARGET_QUESTION) +
             answerImages.toImageEntities(questionId, TARGET_ANSWER)
         if (images.isNotEmpty()) dao.insertQuestionImages(images)
+        replaceQuestionTagLinks(questionId, tagIds)
         questionId
     }
 
@@ -822,10 +980,140 @@ class PaperRepository(private val database: AppDatabase) {
 
     private fun normalize(value: String): String = value.trim().lowercase()
 
+    // ---- Tag helpers --------------------------------------------------------
+
+    private data class ValidTagName(val name: String, val normalizedName: String)
+
+    /** NFC first, then lowercase: the same identity the tags table enforces. */
+    private fun String.tagKey(): String = normalizeTagKey(this)
+
+    private fun validTagName(value: String): ValidTagName? {
+        val trimmed = value.trim()
+        if (trimmed.isEmpty() || trimmed.length > MAX_TAG_NAME_LENGTH) return null
+        if (trimmed.any { it == '\n' || it == '\r' }) return null
+        return ValidTagName(trimmed, trimmed.tagKey())
+    }
+
+    private fun TagEntity.toTag(): Tag = Tag(id, name, normalizedName)
+
+    /** Bounded lookup of tag rows by id (Room expands IN into host parameters). */
+    private suspend fun findTagsByIds(ids: Collection<String>): List<TagEntity> {
+        val distinct = ids.distinct()
+        if (distinct.isEmpty()) return emptyList()
+        val result = mutableListOf<TagEntity>()
+        distinct.chunked(ID_QUERY_BATCH_SIZE).forEach { batch ->
+            result += dao.findTagsByIds(batch)
+        }
+        return result
+    }
+
+    /** Deletes then re-inserts the distinct, existing tag ids for a question. */
+    private suspend fun replaceQuestionTagLinks(
+        questionId: String,
+        tagIds: Set<String>
+    ) {
+        val tags = findTagsByIds(tagIds)
+        val distinctKeys = tags.mapTo(linkedSetOf<String>()) { it.normalizedName }
+        if (distinctKeys.size > MAX_QUESTION_TAGS) {
+            throw IllegalArgumentException("A question can have at most 20 tags.")
+        }
+        dao.deleteQuestionTags(questionId)
+        val validIds = tags.map { it.id }
+        if (validIds.isEmpty()) return
+        dao.insertQuestionTags(validIds.map { QuestionTagEntity(questionId, it) })
+    }
+
+    /** Resolves display names to tag rows, creating missing tags once, globally. */
+    private suspend fun resolveTagNames(names: Collection<String>): Map<String, TagEntity> {
+        val normalizedToName = linkedMapOf<String, String>()
+        names.forEach { raw ->
+            val parts = validTagName(raw) ?: return@forEach
+            if (!normalizedToName.containsKey(parts.normalizedName)) {
+                normalizedToName[parts.normalizedName] = parts.name
+            }
+        }
+        if (normalizedToName.isEmpty()) return emptyMap()
+
+        val existing = dao.findTags().associateBy { it.normalizedName }
+        val resolved = linkedMapOf<String, TagEntity>()
+        val missing = mutableListOf<TagEntity>()
+        normalizedToName.forEach { (normalized, displayName) ->
+            val tag = existing[normalized] ?: TagEntity(
+                id = UUID.randomUUID().toString(),
+                name = displayName,
+                normalizedName = normalized
+            ).also { missing += it }
+            resolved[normalized] = tag
+        }
+        if (missing.isNotEmpty()) dao.insertTags(missing)
+        return resolved
+    }
+
+    /**
+     * Validates the TRUE post-merge tag count for every question touched by a
+     * MERGE. [linkTagsForQuestions] inserts with IGNORE and never deletes, so a
+     * matched question keeps its existing links and the result is the UNION of
+     * those links and the incoming names — not just the incoming names. Load the
+     * existing normalized keys in bounded batches, combine them with the
+     * incoming names, and reject any question over the cap before a single link
+     * is written. The caller's transaction rolls the whole import back on throw.
+     */
+    private suspend fun validateMergedTagCounts(
+        tagsByQuestion: Map<String, List<String>>
+    ) {
+        if (tagsByQuestion.isEmpty()) return
+        val existingKeysByQuestion = linkedMapOf<String, Set<String>>()
+        tagsByQuestion.keys.distinct().chunked(ID_QUERY_BATCH_SIZE).forEach { batch ->
+            dao.findTagRowsByQuestionIds(batch)
+                .groupBy { it.questionId }
+                .forEach { (questionId, rows) ->
+                    existingKeysByQuestion[questionId] = rows
+                        .mapTo(linkedSetOf<String>()) { it.normalizedName }
+                }
+        }
+        tagsByQuestion.forEach { (questionId, names) ->
+            val unionKeys = existingKeysByQuestion[questionId].orEmpty() +
+                names.mapNotNull { validTagName(it)?.normalizedName }
+            if (unionKeys.size > MAX_QUESTION_TAGS) {
+                throw IllegalArgumentException("A question can have at most 20 tags.")
+            }
+        }
+    }
+
+    /**
+     * Resolves all incoming tag names in one pass and writes every link in a
+     * single insert. The IGNORE conflict strategy makes this additive for MERGE:
+     * links a matched question already had are preserved (UNION, never removal).
+     */
+    private suspend fun linkTagsForQuestions(
+        tagsByQuestion: Map<String, List<String>>
+    ) {
+        val allNames = tagsByQuestion.values.flatten()
+        if (allNames.isEmpty()) return
+        val resolved = resolveTagNames(allNames)
+        val links = mutableListOf<QuestionTagEntity>()
+        tagsByQuestion.forEach { (questionId, names) ->
+            val distinctKeys = names.mapNotNull {
+                validTagName(it)?.normalizedName
+            }.toSet()
+            if (distinctKeys.size > MAX_QUESTION_TAGS) {
+                throw IllegalArgumentException("A question can have at most 20 tags.")
+            }
+            names.forEach { raw ->
+                val parts = validTagName(raw) ?: return@forEach
+                resolved[parts.normalizedName]?.let { tag ->
+                    links += QuestionTagEntity(questionId, tag.id)
+                }
+            }
+        }
+        if (links.isNotEmpty()) dao.insertQuestionTags(links.distinct())
+    }
+
     private companion object {
         const val TARGET_QUESTION = "QUESTION"
         const val TARGET_ANSWER = "ANSWER"
         // Below the 999 host-parameter limit of older SQLite versions.
-        const val IMAGE_ID_QUERY_BATCH_SIZE = 900
+        const val ID_QUERY_BATCH_SIZE = 900
+        const val MAX_TAG_NAME_LENGTH = 40
     }
 }

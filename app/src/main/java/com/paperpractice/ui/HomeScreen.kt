@@ -33,6 +33,7 @@ import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Label
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Restore
@@ -99,7 +100,8 @@ fun HomeScreen(
     viewModel: MainViewModel,
     onOpenPaper: (String) -> Unit,
     onOpenQuestions: (String) -> Unit,
-    onSearch: () -> Unit
+    onSearch: () -> Unit,
+    onManageTags: () -> Unit
 ) {
     val papers by viewModel.papers.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -204,6 +206,16 @@ fun HomeScreen(
                                 onClick = {
                                     homeMenuOpen = false
                                     showThemeDialog = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Manage tags") },
+                                leadingIcon = {
+                                    Icon(Icons.Outlined.Label, contentDescription = null)
+                                },
+                                onClick = {
+                                    homeMenuOpen = false
+                                    onManageTags()
                                 }
                             )
                             DropdownMenuItem(

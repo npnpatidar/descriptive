@@ -375,6 +375,204 @@ class TestGeneratorTest {
         }
     }
 
+    private val taggedPaper = PaperDetail(
+        id = "paper-tagged",
+        name = "Tagged",
+        categories = listOf(
+            CategoryDetail(
+                id = "cat-a",
+                name = "History",
+                questions = listOf(
+                    QuestionDetail("a1", "A1?", "Ans A1", tags = listOf("Geography", "Ancient")),
+                    QuestionDetail("a2", "A2?", "Ans A2", tags = listOf("Geography")),
+                    QuestionDetail("a3", "A3?", "Ans A3", tags = listOf("Science")),
+                    QuestionDetail("a4", "A4?", "Ans A4", tags = listOf("Cafe\u0301"))
+                )
+            ),
+            CategoryDetail(
+                id = "cat-b",
+                name = "Science",
+                questions = listOf(
+                    QuestionDetail("b1", "B1?", "Ans B1", tags = listOf("Science")),
+                    QuestionDetail("b2", "B2?", "Ans B2", tags = listOf("Geography"))
+                )
+            )
+        )
+    )
+
+    @Test
+    fun tagFilterIncludesOnlyMatchingQuestions() {
+        val session = TestGenerator.generate(
+            paper = taggedPaper,
+            selectedCategoryIds = setOf("cat-a"),
+            requestedCounts = mapOf("cat-a" to 2),
+            tagFilter = setOf("Geography")
+        )
+
+        assertEquals(setOf("a1", "a2"), session.questions.map { it.questionId }.toSet())
+        assertTrue(session.questions.all { "Geography" in it.tags })
+    }
+
+    @Test
+    fun tagFilterMatchesAnyOfTheSelectedTags() {
+        val session = TestGenerator.generate(
+            paper = taggedPaper,
+            selectedCategoryIds = setOf("cat-a"),
+            requestedCounts = mapOf("cat-a" to 3),
+            tagFilter = setOf("Geography", "Science")
+        )
+
+        assertEquals(setOf("a1", "a2", "a3"), session.questions.map { it.questionId }.toSet())
+    }
+
+    @Test
+    fun tagFilterMatchesCaseInsensitivelyAcrossUnicodeNormalForms() {
+        val byCase = TestGenerator.generate(
+            paper = taggedPaper,
+            selectedCategoryIds = setOf("cat-a"),
+            requestedCounts = mapOf("cat-a" to 2),
+            tagFilter = setOf("geography")
+        )
+        assertEquals(setOf("a1", "a2"), byCase.questions.map { it.questionId }.toSet())
+
+        val byDecomposed = TestGenerator.generate(
+            paper = taggedPaper,
+            selectedCategoryIds = setOf("cat-a"),
+            requestedCounts = mapOf("cat-a" to 1),
+            tagFilter = setOf("CAFÉ")
+        )
+        assertEquals("a4", byDecomposed.questions.single().questionId)
+    }
+
+    @Test
+    fun tagFilterIsAppliedToAvailabilityValidation() {
+        expectFailureWithMessage("exceeds the 1 available questions") {
+            TestGenerator.generate(
+                paper = taggedPaper,
+                selectedCategoryIds = setOf("cat-a"),
+                requestedCounts = mapOf("cat-a" to 3),
+                tagFilter = setOf("Science")
+            )
+        }
+
+        val ok = TestGenerator.generate(
+            paper = taggedPaper,
+            selectedCategoryIds = setOf("cat-a"),
+            requestedCounts = mapOf("cat-a" to 1),
+            tagFilter = setOf("Science")
+        )
+        assertEquals("a3", ok.questions.single().questionId)
+    }
+
+    @Test
+    fun tagFilterAvailabilityCountsNestedTaggedQuestions() {
+        // The selected parent has no direct questions; the only question with
+        // the chosen tag lives in a child subtree. Availability and sampling
+        // must both see that nested question.
+        val nestedTaggedPaper = PaperDetail(
+            id = "paper-nested-tagged",
+            name = "Nested tagged",
+            categories = listOf(
+                CategoryDetail(
+                    id = "science",
+                    name = "Science",
+                    questions = emptyList(),
+                    children = listOf(
+                        CategoryDetail(
+                            id = "physics",
+                            name = "Physics",
+                            questions = listOf(
+                                QuestionDetail(
+                                    "n-tagged",
+                                    "Tagged nested question?",
+                                    "A",
+                                    tags = listOf("Relativity")
+                                ),
+                                QuestionDetail(
+                                    "n-other",
+                                    "Untagged nested question?",
+                                    "B",
+                                    tags = listOf("Other")
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        // (a) Requesting the single matching nested question succeeds.
+        val ok = TestGenerator.generate(
+            paper = nestedTaggedPaper,
+            selectedCategoryIds = setOf("science"),
+            requestedCounts = mapOf("science" to 1),
+            tagFilter = setOf("Relativity"),
+            random = Random(5)
+        )
+        assertEquals("n-tagged", ok.questions.single().questionId)
+        assertTrue(ok.questions.single().tags.contains("Relativity"))
+
+        // (b) Requesting more than the one matching nested question is rejected
+        // with the filtered availability count.
+        expectFailureWithMessage("exceeds the 1 available questions") {
+            TestGenerator.generate(
+                paper = nestedTaggedPaper,
+                selectedCategoryIds = setOf("science"),
+                requestedCounts = mapOf("science" to 2),
+                tagFilter = setOf("Relativity")
+            )
+        }
+    }
+
+    @Test
+    fun sessionQuestionsCarryTheirDisplayTags() {
+        val session = TestGenerator.generate(
+            paper = taggedPaper,
+            selectedCategoryIds = setOf("cat-a"),
+            requestedCounts = mapOf("cat-a" to 2),
+            tagFilter = setOf("Geography")
+        )
+
+        val byId = session.questions.associateBy { it.questionId }
+        assertEquals(listOf("Geography", "Ancient"), byId.getValue("a1").tags)
+        assertEquals(listOf("Geography"), byId.getValue("a2").tags)
+    }
+
+    @Test
+    fun noFilterKeepsAllQuestionsEligible() {
+        val session = TestGenerator.generate(
+            paper = taggedPaper,
+            selectedCategoryIds = setOf("cat-a"),
+            requestedCounts = mapOf("cat-a" to 4)
+        )
+
+        assertEquals(setOf("a1", "a2", "a3", "a4"), session.questions.map { it.questionId }.toSet())
+    }
+
+    @Test
+    fun filterMatchingNothingProducesEmptyTestError() {
+        expectFailureWithMessage("Choose at least one question") {
+            TestGenerator.generate(
+                paper = taggedPaper,
+                selectedCategoryIds = setOf("cat-a"),
+                requestedCounts = mapOf("cat-a" to 0),
+                tagFilter = setOf("DoesNotExist")
+            )
+        }
+    }
+
+    private fun expectFailureWithMessage(fragment: String, block: () -> Unit) {
+        try {
+            block()
+            fail("Expected IllegalArgumentException containing: $fragment")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(
+                "Expected message to contain '$fragment' but was '${expected.message}'",
+                expected.message.orEmpty().contains(fragment)
+            )
+        }
+    }
+
     private fun expectFailure(block: () -> Unit) {
         try {
             block()

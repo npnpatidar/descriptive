@@ -116,7 +116,8 @@ object ExportContentBuilder {
                     questionText = question.questionText,
                     answerText = question.answerText,
                     questionImages = question.questionImages,
-                    answerImages = question.answerImages
+                    answerImages = question.answerImages,
+                    tags = question.tags
                 )
             )
         }
@@ -138,7 +139,8 @@ object ExportContentBuilder {
                 questionText = it.questionText,
                 answerText = it.answerText,
                 questionImages = it.questionImages,
-                answerImages = it.answerImages
+                answerImages = it.answerImages,
+                tags = it.tags
             )
         },
         categories = category.children.map(::categoryContent)
@@ -168,7 +170,7 @@ object ExportContentBuilder {
 
     private fun CategoryContent.withoutAnswers(): CategoryContent = copy(
         questions = questions.map {
-            it.copy(answerText = "", answerImages = emptyList())
+            it.copy(answerText = "", answerImages = emptyList(), tags = it.tags)
         },
         categories = categories.map { it.withoutAnswers() }
     )

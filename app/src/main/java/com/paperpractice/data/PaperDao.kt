@@ -2,6 +2,7 @@ package com.paperpractice.data
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
@@ -258,4 +259,106 @@ abstract class PaperDao {
 
     @Query("DELETE FROM papers WHERE id = :paperId")
     abstract suspend fun deletePaper(paperId: String)
+
+    // ---- Global tag library -------------------------------------------------
+
+    @Query(
+        """
+        SELECT * FROM tags
+         ORDER BY normalizedName ASC, name ASC, id ASC
+        """
+    )
+    abstract fun observeTags(): Flow<List<TagEntity>>
+
+    @Query(
+        """
+        SELECT * FROM tags
+         ORDER BY normalizedName ASC, name ASC, id ASC
+        """
+    )
+    abstract suspend fun findTags(): List<TagEntity>
+
+    @Query("SELECT * FROM tags WHERE id = :tagId")
+    abstract suspend fun findTagById(tagId: String): TagEntity?
+
+    @Query("SELECT * FROM tags WHERE normalizedName = :normalizedName LIMIT 1")
+    abstract suspend fun findTagByNormalizedName(normalizedName: String): TagEntity?
+
+    @Query("SELECT * FROM tags WHERE id IN (:tagIds)")
+    abstract suspend fun findTagsByIds(tagIds: List<String>): List<TagEntity>
+
+    @Insert
+    abstract suspend fun insertTag(tag: TagEntity)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    abstract suspend fun insertTags(tags: List<TagEntity>)
+
+    @Query("UPDATE tags SET name = :name, normalizedName = :normalizedName WHERE id = :tagId")
+    abstract suspend fun updateTag(
+        tagId: String,
+        name: String,
+        normalizedName: String
+    ): Int
+
+    @Query("DELETE FROM tags WHERE id = :tagId")
+    abstract suspend fun deleteTag(tagId: String): Int
+
+    /** Removes only tags with no question links; tagId is NOT NULL, so NOT IN is safe. */
+    @Query("DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tagId FROM question_tags)")
+    abstract suspend fun deleteUnusedTags(): Int
+
+    /**
+     * Rows for an explicit set of questions in one bounded query. Grouped and
+     * sorted by the repository so there is no per-question lookup.
+     */
+    @Query(
+        """
+        SELECT qt.questionId AS questionId,
+               t.id AS tagId,
+               t.name AS name,
+               t.normalizedName AS normalizedName
+          FROM question_tags qt
+          INNER JOIN tags t ON qt.tagId = t.id
+         WHERE qt.questionId IN (:questionIds)
+         ORDER BY qt.questionId ASC, t.name COLLATE NOCASE ASC, t.id ASC
+        """
+    )
+    abstract suspend fun findTagRowsByQuestionIds(
+        questionIds: List<String>
+    ): List<QuestionTagRow>
+
+    @Query("SELECT questionId FROM question_tags WHERE tagId = :tagId ORDER BY questionId ASC")
+    abstract suspend fun findQuestionIdsByTagId(tagId: String): List<String>
+
+    @Query("SELECT COUNT(*) FROM question_tags WHERE tagId = :tagId")
+    abstract suspend fun countTagLinks(tagId: String): Int
+
+    /**
+     * Drops source links that would collide with an existing target link, so
+     * the remaining source links can be reassigned without a primary-key
+     * conflict. Pair with [reassignTagLinks] inside one transaction.
+     */
+    @Query(
+        """
+        DELETE FROM question_tags
+         WHERE tagId = :sourceTagId
+           AND questionId IN (
+               SELECT questionId FROM question_tags WHERE tagId = :targetTagId
+           )
+        """
+    )
+    abstract suspend fun deleteDuplicateTagLinks(
+        sourceTagId: String,
+        targetTagId: String
+    ): Int
+
+    @Query("UPDATE question_tags SET tagId = :targetTagId WHERE tagId = :sourceTagId")
+    abstract suspend fun reassignTagLinks(sourceTagId: String, targetTagId: String): Int
+
+    @Query("DELETE FROM question_tags WHERE questionId = :questionId")
+    abstract suspend fun deleteQuestionTags(questionId: String): Int
+
+    /** IGNORE keeps existing links intact, which gives MERGE its UNION semantics. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    abstract suspend fun insertQuestionTags(links: List<QuestionTagEntity>)
 }

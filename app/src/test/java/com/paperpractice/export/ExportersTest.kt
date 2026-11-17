@@ -66,12 +66,198 @@ class ExportersTest {
         )
     )
 
+    private val taggedContent = PaperContent(
+        paperName = "Tagged paper",
+        categories = listOf(
+            CategoryContent(
+                categoryName = "History",
+                questions = listOf(
+                    QuestionContent(
+                        questionText = "Tagged question one?",
+                        answerText = "Answer one",
+                        tags = listOf("WW1", "Causes")
+                    ),
+                    QuestionContent(
+                        questionText = "Tagged question two?",
+                        answerText = "Answer two",
+                        tags = listOf("WW1")
+                    )
+                )
+            )
+        )
+    )
+
     @Test
     fun jsonRoundTripsThroughImportParser() {
         val json = JsonExporter.build(content, includeAnswers = true)
         val reparsed = PaperJsonParser.parse(json)
 
         assertEquals(content, reparsed)
+    }
+
+    @Test
+    fun jsonExportContainsTagsAndRoundTripsWithoutLoss() {
+        val json = JsonExporter.build(taggedContent, includeAnswers = true)
+
+        assertTrue(json.contains("\"tags\""))
+        assertTrue(json.contains("WW1"))
+        assertTrue(json.contains("Causes"))
+        assertEquals(taggedContent, PaperJsonParser.parse(json))
+    }
+
+    @Test
+    fun jsonOmitsTagsKeyWhenQuestionHasNoTags() {
+        val json = JsonExporter.build(content, includeAnswers = true)
+
+        assertFalse(json.contains("\"tags\""))
+    }
+
+    @Test
+    fun withoutAnswersKeepsTags() {
+        val stripped = ExportContentBuilder.withoutAnswers(taggedContent)
+        assertEquals(
+            listOf(listOf("WW1", "Causes"), listOf("WW1")),
+            stripped.categories.single().questions.map { it.tags }
+        )
+
+        val parsed = PaperJsonParser.parse(
+            JsonExporter.build(taggedContent, includeAnswers = false)
+        )
+        assertEquals(
+            listOf(listOf("WW1", "Causes"), listOf("WW1")),
+            parsed.categories.single().questions.map { it.tags }
+        )
+        assertTrue(parsed.categories.flatMap { it.questions }.all { it.answerText.isEmpty() })
+    }
+
+    @Test
+    fun everyExportScopePreservesTags() {
+        val paper = PaperDetail(
+            id = "p",
+            name = "Tagged",
+            categories = listOf(
+                CategoryDetail(
+                    id = "c1",
+                    name = "Science",
+                    questions = listOf(
+                        QuestionDetail("q1", "Q1", "A1", tags = listOf("Physics"))
+                    ),
+                    children = listOf(
+                        CategoryDetail(
+                            id = "c2",
+                            name = "Physics",
+                            questions = listOf(
+                                QuestionDetail(
+                                    "q2", "Q2", "A2", tags = listOf("Mechanics", "Motion")
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        val session = TestSession(
+            paperId = "p",
+            paperName = "Tagged",
+            createdAt = 0,
+            questions = listOf(
+                SessionQuestion(
+                    number = 1,
+                    questionId = "q2",
+                    categoryId = "c2",
+                    categoryName = "Science / Physics",
+                    questionText = "Q2",
+                    answerText = "A2",
+                    categoryPath = listOf("Science", "Physics"),
+                    // Deliberately distinct from the paper's q2 tags
+                    // ("Mechanics"/"Motion") so this test proves the
+                    // current-test scope snapshots the session, not the paper.
+                    tags = listOf("SnapshotTag")
+                )
+            )
+        )
+
+        val entire = ExportContentBuilder.entirePaper(paper)
+        val selected = ExportContentBuilder.selectedCategories(paper, setOf("c2"))
+        val current = ExportContentBuilder.currentTest(paper, session)
+
+        assertEquals(
+            listOf("Physics"),
+            entire.categories.single().questions.single().tags
+        )
+        assertEquals(
+            listOf("Mechanics", "Motion"),
+            entire.categories.single().categories.single().questions.single().tags
+        )
+        assertEquals(
+            listOf("Mechanics", "Motion"),
+            selected.categories.single().categories.single().questions.single().tags
+        )
+        // The current-test scope must use the session's distinct tag set. An
+        // implementation that ignored the session and re-read the paper's q2
+        // would produce "Mechanics"/"Motion" here and fail this assertion.
+        assertEquals(
+            listOf("SnapshotTag"),
+            current.categories.single().categories.single().questions.single().tags
+        )
+
+        // All three scopes survive export -> re-import without losing tags.
+        listOf(entire, selected, current).forEach { scope ->
+            assertEquals(scope, PaperJsonParser.parse(JsonExporter.build(scope, true)))
+        }
+
+        // The exported AND re-imported current-test JSON must carry exactly the
+        // session tags, never the paper question's tags.
+        val reparsedCurrent = PaperJsonParser.parse(JsonExporter.build(current, true))
+        assertEquals(
+            listOf("SnapshotTag"),
+            reparsedCurrent.categories.single().categories.single().questions.single().tags
+        )
+        assertFalse(
+            reparsedCurrent.categories.single().categories.single()
+                .questions.single().tags.contains("Mechanics")
+        )
+    }
+
+    @Test
+    fun taggedContentSurvivesBuildWriteByteParity() {
+        listOf(true, false).forEach { includeAnswers ->
+            val fromBuild = JsonExporter
+                .build(taggedContent, includeAnswers).toByteArray(Charsets.UTF_8)
+            val fromWrite = ByteArrayOutputStream().also {
+                JsonExporter.write(it, taggedContent, includeAnswers)
+            }.toByteArray()
+
+            assertArrayEquals(
+                "JSON bytes differ with tags (includeAnswers=$includeAnswers)",
+                fromBuild,
+                fromWrite
+            )
+        }
+    }
+
+    @Test
+    fun taggedContentDoesNotBreakHtmlAndDocxExports() {
+        val html = HtmlExporter.build(taggedContent, includeAnswers = true)
+        assertTrue(html.contains("Tagged question one?"))
+        assertTrue(html.contains("Tagged question two?"))
+        assertEquals(2, Regex("<article class=\"question\">").findAll(html).count())
+
+        val docx = ByteArrayOutputStream().also {
+            DocxExporter.write(taggedContent, includeAnswers = true, answersAtEnd = false, output = it)
+        }.toByteArray()
+        val document = unzip(docx)["word/document.xml"] ?: error("document.xml missing")
+        val text = document.toString(Charsets.UTF_8)
+        assertTrue(text.contains("Tagged question one?"))
+        assertTrue(text.contains("Tagged question two?"))
+
+        val factory = DocumentBuilderFactory.newInstance()
+        factory.isNamespaceAware = true
+        assertEquals(
+            "document",
+            factory.newDocumentBuilder()
+                .parse(ByteArrayInputStream(document)).documentElement.localName
+        )
     }
 
     @Test

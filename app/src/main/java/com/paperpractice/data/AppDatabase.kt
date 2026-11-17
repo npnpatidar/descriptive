@@ -12,9 +12,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         PaperEntity::class,
         CategoryEntity::class,
         QuestionEntity::class,
-        QuestionImageEntity::class
+        QuestionImageEntity::class,
+        TagEntity::class,
+        QuestionTagEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -76,6 +78,56 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Adds the global tag library and its question junction table. Both
+         * tables are additive and empty after the migration, so no existing
+         * paper, category, question or image data is touched. The SQL mirrors
+         * Room's generated schema (NOT NULL columns, composite primary key,
+         * unique tag index and cascading foreign keys) so schema validation
+         * passes without a destructive fallback.
+         *
+         * Room models a many-to-many relation with a junction table whose
+         * composite primary key is paired with an index on the child column;
+         * foreign keys use ON DELETE CASCADE. See
+         * https://developer.android.com/training/data-storage/room/relationships/many-to-many#define
+         * and https://developer.android.com/reference/androidx/room/ForeignKey
+         */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `tags` (
+                        `id` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `normalizedName` TEXT NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_tags_normalizedName` " +
+                        "ON `tags` (`normalizedName`)"
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `question_tags` (
+                        `questionId` TEXT NOT NULL,
+                        `tagId` TEXT NOT NULL,
+                        PRIMARY KEY(`questionId`, `tagId`),
+                        FOREIGN KEY(`questionId`) REFERENCES `questions`(`id`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(`tagId`) REFERENCES `tags`(`id`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_question_tags_tagId` " +
+                        "ON `question_tags` (`tagId`)"
+                )
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -83,7 +135,12 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "papers.db"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(
+                        MIGRATION_2_3,
+                        MIGRATION_3_4,
+                        MIGRATION_4_5,
+                        MIGRATION_5_6
+                    )
                     .build()
                     .also { instance = it }
             }

@@ -360,4 +360,73 @@ class BackupAndImagesTest {
         assertEquals(2, PaperBackup.parse(fromBuild).size)
         assertEquals(2, PaperBackup.parse(fromWrite).size)
     }
+
+    @Test
+    fun `backup round trip preserves tags`() {
+        val tagged = PaperContent(
+            paperName = "Tagged",
+            categories = listOf(
+                CategoryContent(
+                    "C",
+                    listOf(
+                        QuestionContent("Q1", "A1", tags = listOf("Alpha", "Beta")),
+                        QuestionContent("Q2", "A2", tags = listOf("Beta"))
+                    )
+                )
+            )
+        )
+
+        val restored = PaperBackup.parse(PaperBackup.build(listOf(tagged))).single()
+
+        assertEquals(
+            listOf(listOf("Alpha", "Beta"), listOf("Beta")),
+            restored.categories.single().questions.map { it.tags }
+        )
+    }
+
+    @Test
+    fun `backup wrapper version one is accepted`() {
+        assertEquals(1, PaperBackup.VERSION)
+        val backup = """
+            {"format":"paper-practice-backup","version":1,
+             "papers":[{"paperName":"P","categories":[{"categoryName":"C","questions":[
+               {"questionText":"Q","answerText":"A","tags":["Tag"]}
+             ]}]}]}
+        """.trimIndent()
+
+        val restored = PaperBackup.parse(backup).single()
+        assertEquals(listOf("Tag"), restored.categories.single().questions.single().tags)
+    }
+
+    @Test
+    fun `plain tagged paper export restored through backup path keeps tags`() {
+        val tagged = paper().copy(
+            categories = paper().categories.map { category ->
+                category.copy(questions = category.questions.map { q ->
+                    q.copy(tags = listOf("Bio", "Cells"))
+                })
+            }
+        )
+
+        val restored = PaperBackup.parse(JsonExporter.build(tagged, true)).single()
+        assertEquals(listOf("Bio", "Cells"), restored.categories.single().questions.single().tags)
+    }
+
+    @Test
+    fun `backup write path preserves tags`() {
+        val tagged = PaperContent(
+            "Tagged",
+            listOf(
+                CategoryContent("C", listOf(QuestionContent("Q", "A", tags = listOf("Alpha"))))
+            )
+        )
+        val written = ByteArrayOutputStream().also {
+            PaperBackup.write(it, listOf(tagged))
+        }.toString(Charsets.UTF_8)
+
+        assertEquals(
+            listOf("Alpha"),
+            PaperBackup.parse(written).single().categories.single().questions.single().tags
+        )
+    }
 }

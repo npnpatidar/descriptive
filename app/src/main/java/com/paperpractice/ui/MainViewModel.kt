@@ -28,6 +28,8 @@ import com.paperpractice.data.PaperRepository
 import com.paperpractice.data.PaperSummary
 import com.paperpractice.data.QuestionDetail
 import com.paperpractice.data.SearchHit
+import com.paperpractice.data.Tag
+import com.paperpractice.data.normalizeTagKey
 import com.paperpractice.domain.ImageContent
 import com.paperpractice.domain.PaperContent
 import com.paperpractice.domain.PaperFormatException
@@ -125,6 +127,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val papers: StateFlow<List<PaperSummary>> = repository.observePapers()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Live global tag library, shared by search, test generation and editors. */
+    val tags: StateFlow<List<Tag>> = repository.observeTags()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Include-only tag ids applied to search and test generation. Empty means
+     * no filter. Ids (not names) are kept so a rename does not break the filter.
+     */
+    var tagFilterIds by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    /** User-facing feedback from the tag-management screen. */
+    var tagMessage by mutableStateOf<String?>(null)
+        private set
 
     /**
      * Fresh for every ViewModel instance and never saved. Compose state keyed
@@ -599,6 +616,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         homeMessage = null
     }
 
+    fun clearTagMessage() {
+        tagMessage = null
+    }
+
     /** Returns the pending image failure and clears it so it cannot replay. */
     fun consumeImageError(): String? {
         val message = imageError
@@ -616,6 +637,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun search(query: String) {
         searchQuery = query
+        runSearch(query)
+    }
+
+    /** Shared by typing and by changing the tag filter, with the same guard. */
+    private fun runSearch(query: String) {
         searchJob?.cancel()
         val generation = ++searchGeneration
         val trimmed = query.trim()
@@ -625,12 +651,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
+        // Capture the filter at launch time so a concurrent change cannot make
+        // an older query read a newer filter (or vice versa).
+        val filterIds = tagFilterIds
         isSearching = true
         searchJob = viewModelScope.launch {
             delay(220)
             try {
                 val results = withContext(Dispatchers.IO) {
-                    repository.search(trimmed, limit = 10_000)
+                    repository.search(trimmed, limit = 10_000, tagIds = filterIds)
                 }
                 if (generation == searchGeneration) {
                     searchResults = results
@@ -648,6 +677,122 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
+    /** Applies a tag include-filter and re-runs a search if one is active. */
+    fun setTagFilter(ids: Set<String>) {
+        tagFilterIds = ids
+        if (searchQuery.trim().length >= 2) {
+            runSearch(searchQuery)
+        }
+    }
+
+    fun clearTagFilter() {
+        setTagFilter(emptySet())
+    }
+
+    // ---------------------------------------------------------------------
+    // Global tag library
+    // ---------------------------------------------------------------------
+
+    /** Creates a tag; returns its id, or null on an invalid/duplicate name. */
+    suspend fun createTag(name: String): String? = try {
+        val created = withContext(Dispatchers.IO) { repository.createTag(name) }
+        tagMessage = if (created != null) {
+            "Added tag \"${created.name}\"."
+        } else {
+            "Could not add that tag. The name may be empty, too long, or already in use."
+        }
+        created?.id
+    } catch (e: Exception) {
+        tagMessage = "Could not add the tag. " +
+            (e.message?.takeIf { it.isNotBlank() } ?: "Please try again.")
+        null
+    }
+
+    suspend fun renameTag(tagId: String, newName: String): Boolean = try {
+        val paperId = selectedPaper?.id
+        val renamed = withContext(Dispatchers.IO) { repository.renameTag(tagId, newName) }
+        tagMessage = if (renamed) {
+            "Tag renamed."
+        } else {
+            "Could not rename the tag. The name may be empty, too long, or already in use."
+        }
+        // QuestionDetail stores display names, so a rename must reload the
+        // open tree for filters and test generation to keep matching.
+        if (renamed && paperId != null) refreshSelectedPaper(paperId)
+        renamed
+    } catch (e: Exception) {
+        tagMessage = "Could not rename the tag. " +
+            (e.message?.takeIf { it.isNotBlank() } ?: "Please try again.")
+        false
+    }
+
+    suspend fun deleteTag(tagId: String): Boolean = try {
+        val paperId = selectedPaper?.id
+        val deleted = withContext(Dispatchers.IO) { repository.deleteTag(tagId) }
+        tagMessage = if (deleted) "Tag deleted." else "Could not delete that tag."
+        if (deleted) {
+            setTagFilter(tagFilterIds - tagId)
+            if (paperId != null) refreshSelectedPaper(paperId)
+        }
+        deleted
+    } catch (e: Exception) {
+        tagMessage = "Could not delete the tag. " +
+            (e.message?.takeIf { it.isNotBlank() } ?: "Please try again.")
+        false
+    }
+
+    /** Moves every link from the source tag into the target, then removes source. */
+    suspend fun mergeTags(sourceTagId: String, targetTagId: String): Boolean = try {
+        val paperId = selectedPaper?.id
+        val merged = withContext(Dispatchers.IO) {
+            repository.mergeTags(sourceTagId, targetTagId)
+        }
+        tagMessage = if (merged) "Tags merged." else "Could not merge those tags."
+        if (merged) {
+            // Only translate a filter that actually contained the source tag.
+            // Merging two tags must not silently activate a filter when none
+            // was set, which would otherwise restrict search/tests to target.
+            if (sourceTagId in tagFilterIds) {
+                setTagFilter((tagFilterIds - sourceTagId) + targetTagId)
+            }
+            if (paperId != null) refreshSelectedPaper(paperId)
+        }
+        merged
+    } catch (e: Exception) {
+        tagMessage = "Could not merge the tags. " +
+            (e.message?.takeIf { it.isNotBlank() } ?: "Please try again.")
+        false
+    }
+
+    suspend fun clearUnusedTags(): Int = try {
+        val removed = withContext(Dispatchers.IO) { repository.clearUnusedTags() }
+        tagMessage = if (removed == 0) {
+            "No unused tags to remove."
+        } else {
+            "Removed $removed unused ${if (removed == 1) "tag" else "tags"}."
+        }
+        if (removed > 0) {
+            // Deleted tag ids must not linger in the filter: they would give
+            // search zero hits forever while tests silently fall back to all
+            // questions. Re-read the live library and keep only surviving ids.
+            val liveIds = withContext(Dispatchers.IO) {
+                repository.getTags().mapTo(linkedSetOf()) { it.id }
+            }
+            setTagFilter(tagFilterIds intersect liveIds)
+        }
+        removed
+    } catch (e: Exception) {
+        tagMessage = "Could not clear unused tags. " +
+            (e.message?.takeIf { it.isNotBlank() } ?: "Please try again.")
+        0
+    }
+
+    /** Display names for [ids] from the current library, sorted like the DB. */
+    private fun tagDisplayNames(ids: Set<String>): List<String> =
+        tags.value.filter { it.id in ids }
+            .map { it.name }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it })
 
     fun clearSearch() {
         searchGeneration++
@@ -1151,10 +1296,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Normalized display names for the ids in the active tag filter. */
+    private fun activeTagKeys(): Set<String> =
+        tags.value.filter { it.id in tagFilterIds }
+            .mapTo(linkedSetOf()) { normalizeTagKey(it.name) }
+
+    /**
+     * Questions in this subtree that the active tag filter would keep, counted
+     * as distinct question ids to match TestGenerator (a MERGE import can leave
+     * duplicate ids). With no filter every question is kept, but it is still
+     * de-duplicated by id so the UI never accepts a count the generator rejects.
+     */
+    private fun CategoryDetail.availableWith(keys: Set<String>): Int {
+        return allQuestions()
+            .filter { keys.isEmpty() || it.tags.any { tag -> normalizeTagKey(tag) in keys } }
+            .mapTo(linkedSetOf()) { it.id }
+            .size
+    }
+
     fun toggleCategory(categoryId: String) {
         val paper = selectedPaper ?: return
         val category = paper.findCategory(categoryId) ?: return
-        if (category.totalQuestionCount == 0) return
+        if (category.availableWith(activeTagKeys()) == 0) return
 
         selectedCategoryIds = if (categoryId in selectedCategoryIds) {
             selectedCategoryIds - categoryId
@@ -1196,10 +1359,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .filter { it.category.id in selectedCategoryIds }
         val errors = linkedMapOf<String, String>()
         var total = 0
+        val tagKeys = activeTagKeys()
 
         selectedCategories.forEach { node ->
             val category = node.category
-            val available = category.totalQuestionCount
+            val available = category.availableWith(tagKeys)
             val raw = requestedCounts[category.id].orEmpty()
             val parsed = raw.trim().toIntOrNull()
             when {
@@ -1248,7 +1412,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val generated = TestGenerator.generate(
                 paper = paper,
                 selectedCategoryIds = selectedCategoryIds,
-                requestedCounts = counts
+                requestedCounts = counts,
+                tagFilter = tagDisplayNames(tagFilterIds).toSet()
             )
             val baseSession = generated
             session = baseSession
@@ -1527,7 +1692,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         questionText: String,
         answerText: String,
         questionImages: List<ImageContent> = emptyList(),
-        answerImages: List<ImageContent> = emptyList()
+        answerImages: List<ImageContent> = emptyList(),
+        tagIds: Set<String> = emptySet()
     ): String? {
         val paper = selectedPaper ?: return "No paper is loaded."
         val category = paper.findCategory(categoryId)
@@ -1540,23 +1706,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val newQuestionId = withContext(Dispatchers.IO) {
                 if (questionId == null) {
                     repository.addQuestion(
-                        categoryId,
-                        questionText,
-                        answerText,
-                        questionImages,
-                        answerImages
+                        categoryId = categoryId,
+                        questionText = questionText,
+                        answerText = answerText,
+                        questionImages = questionImages,
+                        answerImages = answerImages,
+                        tagIds = tagIds
                     )
                 } else {
                     repository.updateQuestion(
-                        questionId,
-                        questionText,
-                        answerText,
-                        questionImages,
-                        answerImages
+                        questionId = questionId,
+                        questionText = questionText,
+                        answerText = answerText,
+                        questionImages = questionImages,
+                        answerImages = answerImages,
+                        tagIds = tagIds
                     )
                     null
                 }
             }
+            val savedQuestionId = newQuestionId ?: checkNotNull(questionId)
+            // updateQuestion treats an empty set as "not supplied", so write
+            // links explicitly to make clearing every tag actually stick.
+            withContext(Dispatchers.IO) {
+                repository.setQuestionTags(savedQuestionId, tagIds)
+            }
+            val resolvedTags = tagDisplayNames(tagIds)
 
             // Patch the in-memory tree BEFORE the image-free refresh. That
             // refresh reuses bytes only for question ids already present in the
@@ -1573,14 +1748,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             questionText = questionText,
                             answerText = answerText,
                             questionImages = questionImages,
-                            answerImages = answerImages
+                            answerImages = answerImages,
+                            tags = resolvedTags
                         )
                     )
                 } else {
                     target.updateQuestion(questionId) { question ->
                         question.copy(
                             questionImages = questionImages,
-                            answerImages = answerImages
+                            answerImages = answerImages,
+                            tags = resolvedTags
                         )
                     }
                 }
@@ -1727,6 +1904,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ): CategoryDetail = copy(
         questions = questions.map { question ->
             oldQuestions[question.id]?.let { old ->
+                // Only image bytes are carried over. `question` comes from the
+                // fresh DB tree, so its tag names stay authoritative here.
                 question.copy(
                     questionImages = old.questionImages,
                     answerImages = old.answerImages
@@ -1775,7 +1954,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 questionText = location.question.questionText,
                 answerText = location.question.answerText,
                 questionImages = location.question.questionImages,
-                answerImages = location.question.answerImages
+                answerImages = location.question.answerImages,
+                tags = location.question.tags
             )
         }.mapIndexed { index, question -> question.copy(number = index + 1) }
         session = if (questions.isEmpty()) null else current.copy(questions = questions)

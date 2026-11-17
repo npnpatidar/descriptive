@@ -58,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.paperpractice.data.CategoryDetail
 import com.paperpractice.data.PaperDetail
 import com.paperpractice.ui.util.categoryCountLabel
@@ -79,6 +80,7 @@ fun TestConfigScreen(
 
     val paper = viewModel.selectedPaper?.takeIf { it.id == paperId }
     val summary = viewModel.configSummary()
+    val tags by viewModel.tags.collectAsStateWithLifecycle()
     var collapsedCategoryIds by rememberSaveable(
         paperId,
         stateSaver = listSaver<Set<String>, String>(
@@ -180,6 +182,27 @@ fun TestConfigScreen(
                                     onSelectAll = viewModel::selectAllCategories,
                                     onClear = viewModel::clearCategorySelection
                                 )
+                            }
+                            if (tags.isNotEmpty()) {
+                                item {
+                                    TagFilterChips(
+                                        tags = tags,
+                                        selectedTagIds = viewModel.tagFilterIds,
+                                        onToggleTag = { tagId ->
+                                            val current = viewModel.tagFilterIds
+                                            viewModel.setTagFilter(
+                                                if (tagId in current) {
+                                                    current - tagId
+                                                } else {
+                                                    current + tagId
+                                                }
+                                            )
+                                        },
+                                        onClearTags = viewModel::clearTagFilter,
+                                        hint = "Practise only questions with these tags",
+                                        modifier = Modifier.padding(top = 12.dp)
+                                    )
+                                }
                             }
                             val collapsedIds = collapsedCategoryIds
                             val categoryNodes = paper.visibleCategories(collapsedIds)

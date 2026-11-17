@@ -7,6 +7,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,6 +41,7 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -49,8 +51,10 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -87,9 +91,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.paperpractice.data.CategoryDetail
 import com.paperpractice.data.CategoryNode
+import com.paperpractice.data.MAX_QUESTION_TAGS
 import com.paperpractice.data.PaperDetail
 import com.paperpractice.data.PaperSummary
 import com.paperpractice.data.QuestionDetail
+import com.paperpractice.data.Tag
+import com.paperpractice.data.normalizeTagKey
 import com.paperpractice.domain.ImageContent
 import com.paperpractice.ui.util.categoryCountLabel
 import com.paperpractice.ui.util.decodeImageForDisplay
@@ -104,7 +111,8 @@ private data class QuestionEditorState(
     val questionText: String,
     val answerText: String,
     val questionImages: List<ImageContent> = emptyList(),
-    val answerImages: List<ImageContent> = emptyList()
+    val answerImages: List<ImageContent> = emptyList(),
+    val tagIds: Set<String> = emptySet()
 ) {
     val isNew: Boolean
         get() = questionId == null
@@ -140,7 +148,8 @@ private val questionEditorSaver = Saver<QuestionEditorState?, List<Any>>(
                 value.categoryName,
                 value.questionId ?: "",
                 value.questionText,
-                value.answerText
+                value.answerText,
+                value.tagIds.toList()
             )
         }
     },
@@ -148,12 +157,14 @@ private val questionEditorSaver = Saver<QuestionEditorState?, List<Any>>(
         if (value.size < 5) {
             null
         } else {
+            val restoredTagIds = (value.getOrNull(5) as? List<String>)?.toSet().orEmpty()
             QuestionEditorState(
                 categoryId = value[0] as String,
                 categoryName = value[1] as String,
                 questionId = (value[2] as String).ifBlank { null },
                 questionText = value[3] as String,
-                answerText = value[4] as String
+                answerText = value[4] as String,
+                tagIds = restoredTagIds
             )
         }
     }
@@ -178,6 +189,23 @@ private val addCategoryTargetSaver = Saver<AddCategoryTarget?, List<Any>>(
         }
     }
 )
+
+/** Maps stored tag display names to the ids of global tags that already exist. */
+private fun resolveTagIds(tagNames: List<String>, tags: List<Tag>): Set<String> {
+    if (tagNames.isEmpty()) return emptySet()
+    val byNormalizedName = tags.associateBy { it.normalizedName }
+    return tagNames.mapNotNull { byNormalizedName[normalizeTagKey(it)]?.id }.toSet()
+}
+
+/**
+ * Display names that do not match a global tag yet. Imports normally resolve
+ * these already, so this is only a fallback for older/unusual content.
+ */
+private fun missingTagNames(tagNames: List<String>, tags: List<Tag>): List<String> {
+    if (tagNames.isEmpty()) return emptyList()
+    val known = tags.map { it.normalizedName }.toSet()
+    return tagNames.filter { normalizeTagKey(it) !in known }.distinct()
+}
 
 /** Category targets are restored by id from the paper already in the ViewModel. */
 private fun categorySaver(paper: PaperDetail?) = Saver<CategoryDetail?, List<Any>>(
@@ -493,6 +521,7 @@ fun QuestionsScreen(
                                 question.questionImages,
                                 question.answerImages
                             )
+                            val currentTags = viewModel.tags.value
                             editor = QuestionEditorState(
                                 categoryId = node.category.id,
                                 categoryName = node.displayName,
@@ -500,8 +529,21 @@ fun QuestionsScreen(
                                 questionText = question.questionText,
                                 answerText = question.answerText,
                                 questionImages = question.questionImages,
-                                answerImages = question.answerImages
+                                answerImages = question.answerImages,
+                                tagIds = resolveTagIds(question.tags, currentTags)
                             )
+                            val missing = missingTagNames(question.tags, currentTags)
+                            if (missing.isNotEmpty()) {
+                                scope.launch {
+                                    val created = missing.mapNotNull { viewModel.createTag(it) }
+                                    if (created.isNotEmpty()) {
+                                        val open = editor
+                                        if (open?.questionId == question.id) {
+                                            editor = open.copy(tagIds = open.tagIds + created)
+                                        }
+                                    }
+                                }
+                            }
                         }
                     },
                     onAddQuestion = { node ->
@@ -2010,6 +2052,24 @@ private fun QuestionEditorDialog(
     var importingAnswerImages by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var saveError by remember { mutableStateOf<String?>(null) }
+    var selectedTagIds by rememberSaveable(
+        state.questionId,
+        state.tagIds.sorted().joinToString(","),
+        stateSaver = stringSetSaver
+    ) {
+        mutableStateOf(state.tagIds)
+    }
+    var showAddTag by rememberSaveable(state.questionId) { mutableStateOf(false) }
+    // A tag created here may not have reached the tags flow yet; keep it locally
+    // so its chip appears immediately.
+    var locallyCreatedTags by remember(state.questionId) {
+        mutableStateOf<List<Tag>>(emptyList())
+    }
+    val allTags by viewModel.tags.collectAsStateWithLifecycle()
+    val selectedTags = remember(selectedTagIds, allTags, locallyCreatedTags) {
+        val byId = (allTags + locallyCreatedTags).associateBy { it.id }
+        selectedTagIds.mapNotNull { byId[it] }
+    }
     val scope = rememberCoroutineScope()
     val questionBlank = questionText.isBlank()
 
@@ -2111,6 +2171,13 @@ private fun QuestionEditorDialog(
                     }
                 )
                 Spacer(Modifier.height(12.dp))
+                TagEditorSection(
+                    selectedTags = selectedTags,
+                    atTagLimit = selectedTagIds.size >= MAX_QUESTION_TAGS,
+                    onRemove = { id -> selectedTagIds = selectedTagIds - id },
+                    onAdd = { showAddTag = true }
+                )
+                Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = answerText,
                     onValueChange = {
@@ -2168,7 +2235,8 @@ private fun QuestionEditorDialog(
                             questionText = questionText,
                             answerText = answerText,
                             questionImages = questionImages,
-                            answerImages = answerImages
+                            answerImages = answerImages,
+                            tagIds = selectedTagIds
                         )
                         if (error == null) {
                             onSaved(state.isNew)
@@ -2206,6 +2274,205 @@ private fun QuestionEditorDialog(
                     Text("Cancel")
                 }
             }
+        }
+    )
+
+    if (showAddTag && selectedTagIds.size < MAX_QUESTION_TAGS) {
+        AddTagDialog(
+            tags = allTags,
+            selectedIds = selectedTagIds,
+            onDismiss = { showAddTag = false },
+            onPick = { tag ->
+                selectedTagIds = selectedTagIds + tag.id
+                showAddTag = false
+            },
+            onCreateTag = { name ->
+                val id = viewModel.createTag(name)
+                if (id != null) {
+                    val trimmed = name.trim()
+                    val tag = Tag(id, trimmed, normalizeTagKey(trimmed))
+                    locallyCreatedTags = locallyCreatedTags + tag
+                    tag
+                } else {
+                    null
+                }
+            }
+        )
+    }
+}
+
+/** A removable chip for a tag already attached to the question. */
+@Composable
+private fun SelectedTagChip(name: String, onRemove: () -> Unit) {
+    InputChip(
+        selected = false,
+        // The whole chip is the single 48dp remove target; the trailing cross
+        // is a visual affordance only, not a second overlapping click target.
+        onClick = onRemove,
+        label = { Text(name) },
+        trailingIcon = {
+            Icon(
+                Icons.Outlined.Close,
+                contentDescription = "Remove tag $name",
+                modifier = Modifier.size(18.dp)
+            )
+        },
+        modifier = Modifier.heightIn(min = 48.dp)
+    )
+}
+
+@Composable
+private fun TagEditorSection(
+    selectedTags: List<Tag>,
+    atTagLimit: Boolean,
+    onRemove: (String) -> Unit,
+    onAdd: () -> Unit
+) {
+    Column {
+        Text(
+            "Tags",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.height(8.dp))
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            selectedTags.forEach { tag ->
+                SelectedTagChip(name = tag.name, onRemove = { onRemove(tag.id) })
+            }
+            AssistChip(
+                onClick = onAdd,
+                enabled = !atTagLimit,
+                label = { Text("Add tag") },
+                leadingIcon = {
+                    Icon(
+                        Icons.Outlined.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                modifier = Modifier.heightIn(min = 48.dp)
+            )
+        }
+        if (atTagLimit) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "A question can have at most 20 tags.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+/** Pick an existing global tag or type a name to create a new one. */
+@Composable
+private fun AddTagDialog(
+    tags: List<Tag>,
+    selectedIds: Set<String>,
+    onDismiss: () -> Unit,
+    onPick: (Tag) -> Unit,
+    onCreateTag: suspend (String) -> Tag?
+) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var creating by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val normalizedQuery = normalizeTagKey(query)
+    val suggestions = tags.filter { tag ->
+        tag.id !in selectedIds &&
+            (normalizedQuery.isBlank() || tag.normalizedName.contains(normalizedQuery))
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add tag") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = {
+                        query = it
+                        error = null
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Tag name") },
+                    singleLine = true
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Choose an existing tag, or type a name to create a new one.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(6.dp))
+                if (suggestions.isEmpty()) {
+                    Text(
+                        "No matching tags yet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        suggestions.forEach { tag ->
+                            FilterChip(
+                                selected = false,
+                                onClick = { onPick(tag) },
+                                label = { Text(tag.name) },
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            )
+                        }
+                    }
+                }
+                error?.let { message ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = query.isNotBlank() && !creating,
+                onClick = {
+                    val typed = query.trim()
+                    creating = true
+                    scope.launch {
+                        // Reuse a tag that already exists instead of creating a
+                        // duplicate (createTag rejects duplicates).
+                        val tag = tags.firstOrNull { it.normalizedName == normalizeTagKey(typed) }
+                            ?: onCreateTag(typed)
+                        creating = false
+                        if (tag != null) {
+                            onPick(tag)
+                        } else {
+                            error = "Couldn't create that tag. Try another name."
+                        }
+                    }
+                }
+            ) {
+                if (creating) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text("Add")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
 }

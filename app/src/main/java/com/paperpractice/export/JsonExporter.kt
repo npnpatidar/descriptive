@@ -9,6 +9,7 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToStream
@@ -64,6 +65,14 @@ object JsonExporter {
                         buildJsonObject {
                             put("questionText", question.questionText)
                             put("answerText", question.answerText)
+                            if (question.tags.isNotEmpty()) {
+                                put(
+                                    "tags",
+                                    buildJsonArray {
+                                        question.tags.forEach { tag -> add(JsonPrimitive(tag)) }
+                                    }
+                                )
+                            }
                             if (question.questionImages.isNotEmpty()) {
                                 put(
                                     "questionImages",
