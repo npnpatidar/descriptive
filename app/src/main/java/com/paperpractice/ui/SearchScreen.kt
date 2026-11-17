@@ -1,5 +1,6 @@
 package com.paperpractice.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,7 +37,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,7 +63,7 @@ fun SearchScreen(
     onOpenPaper: (String) -> Unit,
     onOpenQuestions: (String) -> Unit
 ) {
-    var filter by remember { mutableStateOf(SearchFilter.ALL) }
+    var filter by rememberSaveable { mutableStateOf(SearchFilter.ALL) }
     val hits = viewModel.searchResults.filter { hit ->
         when (filter) {
             SearchFilter.ALL -> true
@@ -72,17 +73,20 @@ fun SearchScreen(
         }
     }
 
+    // The toolbar back arrow exits via onBack (which clears search in
+    // PaperPracticeApp); system back is handled by NavController, so cover it
+    // here too. Call onBack to pop rather than popping directly.
+    BackHandler {
+        viewModel.clearSearch()
+        onBack()
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Search") },
                 navigationIcon = {
-                    IconButton(
-                        onClick = {
-                            viewModel.clearSearch()
-                            onBack()
-                        }
-                    ) {
+                    IconButton(onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Outlined.ArrowBack,
                             contentDescription = "Back"
@@ -148,6 +152,9 @@ fun SearchScreen(
                 }
 
                 else -> {
+                    // The ViewModel keeps all matches; render a bounded page so a
+                    // broad query cannot flood the list, but report the true count.
+                    val visibleHits = hits.take(80)
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
@@ -160,12 +167,20 @@ fun SearchScreen(
                     ) {
                         item {
                             Text(
-                                if (hits.size == 1) "1 result" else "${hits.size} results",
+                                when {
+                                    hits.size > 80 ->
+                                        "Showing first 80 of ${hits.size} results"
+                                    hits.size == 1 -> "1 result"
+                                    else -> "${hits.size} results"
+                                },
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        items(hits, key = { "${it.kind}-${it.paperId}-${it.categoryId}-${it.questionId}" }) { hit ->
+                        items(
+                            visibleHits,
+                            key = { "${it.kind}-${it.paperId}-${it.categoryId}-${it.questionId}" }
+                        ) { hit ->
                             SearchResultCard(
                                 hit = hit,
                                 onClick = {

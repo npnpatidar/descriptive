@@ -149,4 +149,70 @@ class RichTextTest {
                 .any { it.text.contains("√(") }
         )
     }
+
+    @Test
+    fun `escaped markers render literally`() {
+        // An escaped marker is emitted as a final literal run and must not be
+        // re-rendered by formatText() (subscript/command/script processing).
+        assertEquals("H_2O", RichText.format("H\\_2O"))
+        assertEquals("\\frac{a}{b}", RichText.format("\\\\frac{a}{b}"))
+        assertEquals("\\alpha", RichText.format("\\\\alpha"))
+        assertEquals("*not italic*", RichText.format("\\*not italic\\*"))
+    }
+
+    @Test
+    fun `nested braces and escaped braces inside groups convert`() {
+        // Nested script groups and escaped braces must be consumed by the
+        // converter rather than left as typed markup.
+        assertEquals("xab", RichText.format("x^{a_{b}}"))
+        assertEquals("(a{b})/(c)", RichText.format("\\frac{a\\{b\\}}{c}"))
+    }
+
+    @Test
+    fun `table row with escaped backslash then pipe splits into columns`() {
+        // A pipe preceded by an even number of backslashes is a delimiter; the
+        // escaped backslash itself is kept literally in the cell.
+        val document = RichText.parse(
+            """
+            | Left | Right |
+            | :--- | :--- |
+            | b\\| ok |
+            """.trimIndent()
+        )
+        val table = document.blocks.single() as RichBlock.Table
+
+        assertEquals(2, table.headers.size)
+        assertEquals(1, table.rows.size)
+        val row = table.rows.single()
+        assertEquals(2, row.size)
+        assertEquals("b\\", RichText.plain(row[0]))
+        assertEquals("ok", RichText.plain(row[1]))
+    }
+
+    @Test
+    fun `normal markup still works alongside escape handling`() {
+        assertEquals(
+            "2H₂O",
+            RichText.format("2H_2O")
+        )
+        assertEquals("(a)/(b)", RichText.format("\\frac{a}{b}"))
+
+        val document = RichText.parse("**bold** and *italic*")
+        val runs = (document.blocks.single() as RichBlock.Paragraph)
+            .inlines
+            .filterIsInstance<RichInline.Text>()
+        assertTrue(runs.any { it.text == "bold" && it.style.bold })
+        assertTrue(runs.any { it.text == "italic" && it.style.italic })
+
+        val table = RichText.parse(
+            """
+            | Name | Score |
+            | :--- | ---: |
+            | Ada | 10 |
+            """.trimIndent()
+        ).blocks.single() as RichBlock.Table
+        assertEquals(2, table.headers.size)
+        assertEquals(1, table.rows.size)
+        assertEquals(ColumnAlignment.RIGHT, table.alignments[1])
+    }
 }

@@ -52,12 +52,21 @@ fun ReorderHandle(
                 .pointerInput(enabled) {
                     if (!enabled) return@pointerInput
                     detectVerticalDragGestures(
-                        onDragStart = { accumulated = 0f },
-                        onDragEnd = { accumulated = 0f },
-                        onDragCancel = { accumulated = 0f },
+                        onDragStart = {
+                            accumulated = 0f
+                        },
+                        onDragEnd = {
+                            accumulated = 0f
+                        },
+                        onDragCancel = {
+                            accumulated = 0f
+                        },
                         onVerticalDrag = { change, dragAmount ->
                             change.consume()
                             accumulated += dragAmount
+                            // Emit each crossed threshold immediately so the row
+                            // visibly moves under the finger. The receiver queues
+                            // these steps and applies them sequentially.
                             while (accumulated >= threshold) {
                                 accumulated -= threshold
                                 latestOnMove(1)

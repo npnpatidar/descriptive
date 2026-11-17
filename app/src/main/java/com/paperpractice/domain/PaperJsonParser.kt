@@ -29,12 +29,20 @@ object PaperJsonParser {
             throw PaperFormatException("The selected file is empty.")
         }
 
+        // json parsing is recursive: a pathologically nested document can throw
+        // a StackOverflowError, which is an Error rather than an Exception.
         val root = try {
             Json.parseToJsonElement(text)
-        } catch (e: Exception) {
-            throw PaperFormatException(
-                "The file is not valid JSON. ${friendlyParseError(e.message)}"
-            )
+        } catch (e: Throwable) {
+            // Only convert expected parse failures; let OOM and other Errors
+            // propagate instead of masking them as a bad input file.
+            if (e !is StackOverflowError && e !is Exception) throw e
+            val detail = if (e is StackOverflowError) {
+                "The file is nested too deeply."
+            } else {
+                friendlyParseError(e.message)
+            }
+            throw PaperFormatException("The file is not valid JSON. $detail")
         }
 
         val rootObject = root as? JsonObject
@@ -69,7 +77,9 @@ object PaperJsonParser {
         path: String,
         depth: Int
     ): CategoryContent {
-        if (depth > MAX_CATEGORY_DEPTH) {
+        // Top-level categories are depth 0, so exactly MAX_CATEGORY_DEPTH
+        // levels are allowed and the (MAX + 1)-th is rejected.
+        if (depth >= MAX_CATEGORY_DEPTH) {
             throw PaperFormatException(
                 "$path is nested more than $MAX_CATEGORY_DEPTH levels deep."
             )
@@ -197,14 +207,32 @@ object PaperJsonParser {
             val declaredWidth = optionalInt(imageObject, "width", itemPath)
             val declaredHeight = optionalInt(imageObject, "height", itemPath)
             val inferred = ImageMetadata.dimensions(bytes)
-            val inferredWidth = inferred?.first?.takeIf { it <= MAX_IMAGE_DIMENSION }
-            val inferredHeight = inferred?.second?.takeIf { it <= MAX_IMAGE_DIMENSION }
-            val hasDeclaredSize = declaredWidth > 0 && declaredHeight > 0
+            val inferredWidth = inferred?.first?.takeIf { it in 1..MAX_IMAGE_DIMENSION }
+            val inferredHeight = inferred?.second?.takeIf { it in 1..MAX_IMAGE_DIMENSION }
+
+            // One consistent rule: the image header is authoritative (it also
+            // reflects any EXIF orientation swap). Only when no usable header
+            // size exists do we fall back to declared values, and only when
+            // BOTH are present. Unknown sizes are stored as 0, which every
+            // consumer already treats as "dimensions unavailable".
+            val width: Int
+            val height: Int
+            if (inferredWidth != null && inferredHeight != null) {
+                width = inferredWidth
+                height = inferredHeight
+            } else if (declaredWidth > 0 && declaredHeight > 0) {
+                width = declaredWidth
+                height = declaredHeight
+            } else {
+                width = 0
+                height = 0
+            }
+
             ImageContent(
                 id = UUID.randomUUID().toString(),
                 mimeType = mimeType,
-                width = if (hasDeclaredSize) declaredWidth else inferredWidth ?: declaredWidth,
-                height = if (hasDeclaredSize) declaredHeight else inferredHeight ?: declaredHeight,
+                width = width,
+                height = height,
                 bytes = bytes
             )
         }

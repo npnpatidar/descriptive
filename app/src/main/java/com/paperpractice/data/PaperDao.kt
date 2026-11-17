@@ -3,7 +3,6 @@ package com.paperpractice.data
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
-import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -53,7 +52,9 @@ abstract class PaperDao {
     )
     abstract suspend fun findPapers(): List<PaperEntity>
 
-    @Query("SELECT * FROM papers WHERE lower(name) = lower(:name) LIMIT 1")
+    // Kept as a lookup helper; name identity for imports is decided in Kotlin
+    // (PaperRepository.normalize) because SQLite lower() is ASCII-only.
+    @Query("SELECT * FROM papers WHERE lower(name) = lower(:name) ORDER BY position ASC, id ASC LIMIT 1")
     abstract suspend fun findPaperByName(name: String): PaperEntity?
 
     @Query("SELECT COALESCE(MAX(position), -1) + 1 FROM papers")
@@ -166,6 +167,9 @@ abstract class PaperDao {
         answerText: String
     ): Int
 
+    @Query("UPDATE questions SET answerText = :answerText WHERE id = :questionId")
+    abstract suspend fun updateQuestionAnswer(questionId: String, answerText: String): Int
+
     @Query("DELETE FROM questions WHERE id = :questionId")
     abstract suspend fun deleteQuestion(questionId: String): Int
 
@@ -236,15 +240,4 @@ abstract class PaperDao {
 
     @Query("DELETE FROM papers WHERE id = :paperId")
     abstract suspend fun deletePaper(paperId: String)
-
-    @Transaction
-    open suspend fun insertPaperWithContent(
-        paper: PaperEntity,
-        categories: List<CategoryEntity>,
-        questions: List<QuestionEntity>
-    ) {
-        insertPaper(paper)
-        if (categories.isNotEmpty()) insertCategories(categories)
-        if (questions.isNotEmpty()) insertQuestions(questions)
-    }
 }

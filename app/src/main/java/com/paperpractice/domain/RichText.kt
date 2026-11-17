@@ -98,6 +98,7 @@ object RichText {
     )
 
     private val markerOrder = listOf("**", "++", "~~", "==", "*")
+    private const val MAX_INLINE_DEPTH = 64
 
     fun parse(input: String): RichDocument {
         if (input.isEmpty()) return RichDocument(emptyList())
@@ -218,11 +219,54 @@ object RichText {
     private fun parseRow(line: String): List<String> {
         var value = line.trim()
         if (value.startsWith("|")) value = value.drop(1)
-        if (value.endsWith("|") && !value.endsWith("\\|")) value = value.dropLast(1)
-        if (!value.contains('|')) return listOf(value.trim())
-        return value
-            .split(Regex("""(?<!\\)\|"""))
-            .map { cell -> cell.replace("\\|", "|").trim() }
+        if (value.endsWith("|") && !isEscaped(value, value.length - 1)) {
+            value = value.dropLast(1)
+        }
+
+        // A pipe is a delimiter only when preceded by an EVEN number of
+        // backslashes. A single (odd) backslash escapes it into a literal
+        // pipe, so `\\|` splits while `\|` does not.
+        val cells = mutableListOf<String>()
+        val cell = StringBuilder()
+        var backslashes = 0
+        var index = 0
+        while (index < value.length) {
+            val character = value[index]
+            when {
+                character == '\\' -> {
+                    backslashes++
+                    cell.append(character)
+                }
+                character == '|' -> {
+                    if (backslashes % 2 == 1) {
+                        // Drop the escaping backslash and keep a literal pipe.
+                        cell.deleteCharAt(cell.length - 1)
+                        cell.append('|')
+                    } else {
+                        cells += cell.toString().trim()
+                        cell.setLength(0)
+                    }
+                    backslashes = 0
+                }
+                else -> {
+                    backslashes = 0
+                    cell.append(character)
+                }
+            }
+            index++
+        }
+        cells += cell.toString().trim()
+        return cells
+    }
+
+    private fun isEscaped(value: String, pipeIndex: Int): Boolean {
+        var backslashes = 0
+        var index = pipeIndex - 1
+        while (index >= 0 && value[index] == '\\') {
+            backslashes++
+            index--
+        }
+        return backslashes % 2 == 1
     }
 
     private fun alignment(cell: String): ColumnAlignment {
@@ -236,8 +280,14 @@ object RichText {
 
     private fun parseInline(
         text: String,
-        style: RichInlineStyle = RichInlineStyle()
+        style: RichInlineStyle = RichInlineStyle(),
+        depth: Int = 0
     ): List<RichInline> {
+        if (depth >= MAX_INLINE_DEPTH) {
+            // Pathologically nested markup: stop recursing and keep the rest
+            // literal rather than risk a StackOverflowError.
+            return if (text.isEmpty()) emptyList() else listOf(RichInline.Text(text, style))
+        }
         val result = mutableListOf<RichInline>()
         val buffer = StringBuilder()
 
@@ -260,8 +310,8 @@ object RichText {
                     if (numerator != null && denominator != null) {
                         flush()
                         result += RichInline.Fraction(
-                            numerator = parseInline(numerator.content, style),
-                            denominator = parseInline(denominator.content, style),
+                            numerator = parseInline(numerator.content, style, depth + 1),
+                            denominator = parseInline(denominator.content, style, depth + 1),
                             style = style
                         )
                         index = denominator.next
@@ -275,7 +325,7 @@ object RichText {
                     if (group != null) {
                         flush()
                         result += RichInline.Text("√(", style)
-                        result += parseInline(group.content, style)
+                        result += parseInline(group.content, style, depth + 1)
                         result += RichInline.Text(")", style)
                         index = group.next
                         continue
@@ -283,7 +333,11 @@ object RichText {
                 }
 
                 if (index + 1 < text.length && text[index + 1] in "\\*_^+=~`|{}[]()") {
-                    buffer.append(text[index + 1])
+                    // An escaped marker must bypass formatText(): flushing
+                    // first and emitting a final literal run keeps `\_`,
+                    // `\*`, `\\`, `\frac` etc. from being re-rendered.
+                    flush()
+                    result += RichInline.Text(text[index + 1].toString(), style)
                     index += 2
                     continue
                 }
@@ -308,7 +362,8 @@ object RichText {
                     flush()
                     result += parseInline(
                         text.substring(afterOpening, close),
-                        style.toggle(marker)
+                        style.toggle(marker),
+                        depth + 1
                     )
                     index = close + marker.length
                     continue
@@ -339,6 +394,11 @@ object RichText {
         index = contentStart
         while (index < text.length) {
             when (text[index]) {
+                '\\' -> {
+                    // An escaped brace is literal content, not a nesting level.
+                    index += if (index + 1 < text.length) 2 else 1
+                    continue
+                }
                 '{' -> depth++
                 '}' -> {
                     depth--
@@ -414,23 +474,32 @@ object RichText {
     private fun replaceScripts(
         source: String,
         marker: Char,
-        mapping: Map<Char, Char>
+        mapping: Map<Char, Char>,
+        depth: Int = 0
     ): String {
+        if (depth >= MAX_INLINE_DEPTH) {
+            // Deeply nested braced scripts: stop recursing and keep the
+            // remaining source literal, just like parseInline does.
+            return source
+        }
         val result = StringBuilder(source.length)
         var index = 0
         while (index < source.length) {
             val current = source[index]
             if (current == marker && index + 1 < source.length) {
                 if (source[index + 1] == '{') {
-                    val end = source.indexOf('}', index + 2)
-                    if (end > index + 2) {
-                        val content = source.substring(index + 2, end)
-                        val converted = content.map { mapping[it] }
-                        if (converted.all { it != null }) {
-                            converted.forEach { result.append(it) }
-                            index = end + 1
-                            continue
-                        }
+                    val close = matchingBrace(source, index + 2)
+                    if (close != null && close > index + 2) {
+                        // Convert any nested scripts first, then map this
+                        // level's glyphs. Only a genuinely unbalanced group
+                        // falls through to the literal-text path below.
+                        var content = replaceScripts(
+                            source.substring(index + 2, close), '_', subscripts, depth + 1
+                        )
+                        content = replaceScripts(content, '^', superscripts, depth + 1)
+                        content.forEach { result.append(mapping[it] ?: it) }
+                        index = close + 1
+                        continue
                     }
                 } else {
                     // Unbraced scripts often contain several characters, for
@@ -479,6 +548,27 @@ object RichText {
             index++
         }
         return result.toString()
+    }
+
+    /** Finds the brace matching the one just before [start], ignoring escapes. */
+    private fun matchingBrace(source: String, start: Int): Int? {
+        var depth = 1
+        var index = start
+        while (index < source.length) {
+            when (source[index]) {
+                '\\' -> {
+                    index += if (index + 1 < source.length) 2 else 1
+                    continue
+                }
+                '{' -> depth++
+                '}' -> {
+                    depth--
+                    if (depth == 0) return index
+                }
+            }
+            index++
+        }
+        return null
     }
 
     private data class Group(

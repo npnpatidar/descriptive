@@ -578,17 +578,71 @@ object DocxExporter {
         fraction: RichInline.Fraction,
         sizeHalfPoints: Int,
         color: String
-    ): String {
-        val numerator = RichText.plain(fraction.numerator)
-        val denominator = RichText.plain(fraction.denominator)
-        return buildString {
-            append("<m:oMath><m:f><m:num>")
-            append(mathRunXml(numerator, fraction.style, sizeHalfPoints, color))
-            append("</m:num><m:den>")
-            append(mathRunXml(denominator, fraction.style, sizeHalfPoints, color))
-            append("</m:den></m:f></m:oMath>")
+    ): String = buildString {
+        // A single fraction is inline math. Its numerator and denominator are
+        // recursive inline sequences, so nested fractions become nested m:f
+        // nodes instead of being flattened to plain text.
+        append("<m:oMath>")
+        append(nestedFractionXml(fraction, fraction.style, sizeHalfPoints, color))
+        append("</m:oMath>")
+    }
+
+    private fun nestedFractionXml(
+        fraction: RichInline.Fraction,
+        style: RichInlineStyle,
+        sizeHalfPoints: Int,
+        color: String
+    ): String = buildString {
+        append("<m:f><m:num>")
+        append(mathInlinesXml(fraction.numerator, style, sizeHalfPoints, color))
+        append("</m:num><m:den>")
+        append(mathInlinesXml(fraction.denominator, style, sizeHalfPoints, color))
+        append("</m:den></m:f>")
+    }
+
+    private fun mathInlinesXml(
+        inlines: List<RichInline>,
+        inheritedStyle: RichInlineStyle,
+        sizeHalfPoints: Int,
+        color: String
+    ): String = buildString {
+        inlines.forEach { inline ->
+            when (inline) {
+                is RichInline.Text -> {
+                    append(
+                        mathRunXml(
+                            text = inline.text,
+                            style = combineStyles(inheritedStyle, inline.style),
+                            sizeHalfPoints = sizeHalfPoints,
+                            color = color
+                        )
+                    )
+                }
+
+                is RichInline.Fraction -> {
+                    append(
+                        nestedFractionXml(
+                            fraction = inline,
+                            style = combineStyles(inheritedStyle, inline.style),
+                            sizeHalfPoints = sizeHalfPoints,
+                            color = color
+                        )
+                    )
+                }
+            }
         }
     }
+
+    private fun combineStyles(
+        outer: RichInlineStyle,
+        inner: RichInlineStyle
+    ): RichInlineStyle = RichInlineStyle(
+        bold = outer.bold || inner.bold,
+        italic = outer.italic || inner.italic,
+        underline = outer.underline || inner.underline,
+        strikethrough = outer.strikethrough || inner.strikethrough,
+        highlight = outer.highlight || inner.highlight
+    )
 
     private fun mathRunXml(
         text: String,
@@ -600,9 +654,12 @@ object DocxExporter {
         append("<w:rFonts w:ascii=\"Cambria Math\" w:hAnsi=\"Cambria Math\"/>")
         if (style.bold) append("<w:b/>")
         if (style.italic) append("<w:i/>")
+        if (style.strikethrough) append("<w:strike/>")
         append("<w:color w:val=\"$color\"/>")
         append("<w:sz w:val=\"$sizeHalfPoints\"/>")
         append("<w:szCs w:val=\"$sizeHalfPoints\"/>")
+        if (style.highlight) append("<w:highlight w:val=\"yellow\"/>")
+        if (style.underline) append("<w:u w:val=\"single\"/>")
         append("</w:rPr><m:t xml:space=\"preserve\">")
         append(escapeXml(text))
         append("</m:t></m:r>")

@@ -118,9 +118,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = PaperRepository(AppDatabase.getInstance(application))
     private val appearancePreferences =
         application.getSharedPreferences("appearance", Context.MODE_PRIVATE)
+    private val samplePreferences =
+        application.getSharedPreferences("sample_paper", Context.MODE_PRIVATE)
 
     val papers: StateFlow<List<PaperSummary>> = repository.observePapers()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Fresh for every ViewModel instance and never saved. Compose state keyed
+     * with this token cannot be restored into a new ViewModel after process
+     * death, so an editor never comes back holding text but no images.
+     */
+    val uiSessionToken: String = UUID.randomUUID().toString()
 
     var themeMode by mutableStateOf(
         ThemeMode.fromStoredValue(appearancePreferences.getString("theme_mode", null))
@@ -174,6 +183,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     var configError by mutableStateOf<String?>(null)
         private set
+
+    /** A reason an image picker could not attach a file; shown once in the UI. */
+    var imageError by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * Unsaved attachments for the open question editor. They live here rather
+     * than in Compose saved state because image bytes can exceed the saved-state
+     * transaction limit; the ViewModel survives rotation.
+     */
+    var editorQuestionImages by mutableStateOf<List<ImageContent>>(emptyList())
+        private set
+
+    var editorAnswerImages by mutableStateOf<List<ImageContent>>(emptyList())
+        private set
+
+    fun setEditorImages(
+        questionImages: List<ImageContent>,
+        answerImages: List<ImageContent>
+    ) {
+        editorQuestionImages = questionImages
+        editorAnswerImages = answerImages
+    }
 
     var exportState by mutableStateOf(ExportUiState())
         private set
@@ -349,10 +381,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         .use { it.readText() }
                     PaperJsonParser.parse(text)
                 }
+                // The id is remembered so a renamed sample is not imported a
+                // second time. If that copy was deleted, forget the id and
+                // fall back to the original name check.
+                val storedId = samplePreferences.getString(SAMPLE_PAPER_ID_KEY, null)
+                    ?.takeIf { it.isNotBlank() }
+                val persistedId = withContext(Dispatchers.IO) {
+                    storedId?.let { repository.getPaper(it, includeImages = false)?.id }
+                }
+                if (persistedId != null) {
+                    homeMessage = "Sample paper is already loaded."
+                    samplePaperToOpen = persistedId
+                    return@launch
+                }
+                if (storedId != null) {
+                    samplePreferences.edit { remove(SAMPLE_PAPER_ID_KEY) }
+                }
+
                 val existingId = withContext(Dispatchers.IO) {
                     repository.findPaperIdByName(content.paperName)
                 }
                 if (existingId != null) {
+                    samplePreferences.edit { putString(SAMPLE_PAPER_ID_KEY, existingId) }
                     homeMessage = "Sample paper is already loaded."
                     samplePaperToOpen = existingId
                     return@launch
@@ -361,8 +411,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val imported = withContext(Dispatchers.IO) {
                     repository.importPapers(listOf(content), ImportMode.KEEP_BOTH)
                 }
+                val importedId = imported.firstOrNull()?.id
+                if (importedId != null) {
+                    samplePreferences.edit { putString(SAMPLE_PAPER_ID_KEY, importedId) }
+                }
                 homeMessage = importSummary(imported, replaced = false)
-                samplePaperToOpen = imported.firstOrNull()?.id
+                samplePaperToOpen = importedId
             } catch (e: PaperFormatException) {
                 importError = "Could not load the sample paper. " +
                     (e.message ?: "The sample file is not valid.")
@@ -512,7 +566,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * larger. Image pickers must not be allowed to buffer an arbitrarily large
      * file before the size check.
      */
-    private fun readAtMost(stream: InputStream, limit: Int): ByteArray {
+    private fun readAtMost(
+        stream: InputStream,
+        limit: Int,
+        onTooLarge: () -> Unit = {}
+    ): ByteArray {
         val output = ByteArrayOutputStream()
         val buffer = ByteArray(8 * 1024)
         var total = 0
@@ -520,7 +578,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val read = stream.read(buffer)
             if (read < 0) break
             total += read
-            if (total > limit) return ByteArray(0)
+            if (total > limit) {
+                onTooLarge()
+                return ByteArray(0)
+            }
             output.write(buffer, 0, read)
         }
         return output.toByteArray()
@@ -532,6 +593,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearHomeMessage() {
         homeMessage = null
+    }
+
+    /** Returns the pending image failure and clears it so it cannot replay. */
+    fun consumeImageError(): String? {
+        val message = imageError
+        imageError = null
+        return message
+    }
+
+    fun clearImageError() {
+        imageError = null
     }
 
     // ---------------------------------------------------------------------
@@ -554,7 +626,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             delay(220)
             try {
                 val results = withContext(Dispatchers.IO) {
-                    repository.search(trimmed)
+                    repository.search(trimmed, limit = 10_000)
                 }
                 if (generation == searchGeneration) {
                     searchResults = results
@@ -594,7 +666,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun consumeContentFocus(paperId: String): ContentFocus? {
         val focus = pendingContentFocus ?: return null
-        if (focus.paperId != paperId) return null
+        if (focus.paperId != paperId) {
+            // The focus belongs to a different paper; do not let it leak into
+            // the next paper the user opens.
+            pendingContentFocus = null
+            return null
+        }
         pendingContentFocus = null
         return focus
     }
@@ -684,6 +761,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (normalized.isEmpty()) {
             return CreatePaperResult.Failure("Enter a paper name.")
         }
+        if (hasPaperWithName(normalized)) {
+            return CreatePaperResult.Failure(
+                "A paper named \"$normalized\" already exists."
+            )
+        }
 
         return try {
             val paper = withContext(Dispatchers.IO) {
@@ -701,6 +783,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun renamePaper(paperId: String, name: String): String? {
         val normalized = name.trim()
         if (normalized.isEmpty()) return "Enter a paper name."
+        if (hasPaperWithName(normalized, exceptPaperId = paperId)) {
+            return "A paper named \"$normalized\" already exists."
+        }
 
         return try {
             withContext(Dispatchers.IO) {
@@ -720,6 +805,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: Exception) {
             "Could not rename the paper. " +
                 (e.message?.takeIf { it.isNotBlank() } ?: "Please try again.")
+        }
+    }
+
+    /** Imports match names case-insensitively; manual create/rename must too. */
+    private fun hasPaperWithName(name: String, exceptPaperId: String? = null): Boolean {
+        val lowered = name.trim().lowercase()
+        return papers.value.any { paper ->
+            paper.id != exceptPaperId && paper.name.trim().lowercase() == lowered
         }
     }
 
@@ -1145,16 +1238,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * PDF/DOCX rendering while still looking crisp on phone screens and print.
      */
     suspend fun prepareImage(uri: Uri): ImageContent? = withContext(Dispatchers.IO) {
+        // A batch of picked images may contain several failures; do not clear a
+        // message set by an earlier file. The picker callback consumes the
+        // final message and shows it inline in the editor dialog.
         try {
             val resolver = getApplication<Application>().contentResolver
+            var tooLarge = false
             val sourceBytes = resolver.openInputStream(uri)?.use { stream ->
-                readAtMost(stream, MAX_SOURCE_IMAGE_BYTES)
-            } ?: return@withContext null
-            if (sourceBytes.isEmpty()) return@withContext null
+                readAtMost(stream, MAX_SOURCE_IMAGE_BYTES) { tooLarge = true }
+            } ?: run {
+                imageError = "That image could not be opened."
+                return@withContext null
+            }
+            if (sourceBytes.isEmpty()) {
+                imageError = if (tooLarge) {
+                    "That image is too large. Images must be under " +
+                        "${MAX_SOURCE_IMAGE_BYTES / (1024 * 1024)} MB."
+                } else {
+                    "That image is empty or could not be read."
+                }
+                return@withContext null
+            }
 
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(sourceBytes, 0, sourceBytes.size, bounds)
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext null
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                imageError = "That file is not a supported image format."
+                return@withContext null
+            }
 
             var sampleSize = 1
             while (
@@ -1171,7 +1282,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 0,
                 sourceBytes.size,
                 decodeOptions
-            ) ?: return@withContext null
+            ) ?: run {
+                imageError = "That image could not be decoded."
+                return@withContext null
+            }
 
             val orientation = try {
                 ExifInterface(ByteArrayInputStream(sourceBytes)).getAttributeInt(
@@ -1207,6 +1321,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 bytes = stored.bytes
             )
         } catch (_: Exception) {
+            imageError = "That image could not be added. Please try another file."
             null
         }
     }
@@ -1407,15 +1522,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (selectedPaper?.id != paperId) return
 
         selectedPaper = detail
-        val currentCategoryIds = detail.allCategoryIds()
-        selectedCategoryIds = selectedCategoryIds.filter { it in currentCategoryIds }.toSet()
-        requestedCounts = requestedCounts.filterKeys { it in currentCategoryIds } +
-            detail.flattenCategories()
-                .filter { it.category.id !in requestedCounts }
-                .associate { node ->
-                    node.category.id to
-                        if (node.category.totalQuestionCount == 0) "0" else "1"
-                }
+        val nodes = detail.flattenCategories()
+        val nodeById = nodes.associateBy { it.category.id }
+
+        // Selecting a category covers its whole subtree. A move/merge/delete
+        // can leave both an ancestor and one of its descendants selected, which
+        // would double-count their questions. Keep only the outermost selected
+        // id and drop any selected id it covers. The outcome is independent of
+        // iteration order: an ancestor always displaces a kept descendant, and
+        // a kept ancestor always makes a descendant get skipped, so the
+        // topmost id of every overlapping group survives.
+        val previousSelection = selectedCategoryIds
+        val normalizedSelection = linkedSetOf<String>()
+        previousSelection.forEach { id ->
+            val node = nodeById[id] ?: return@forEach
+            if (normalizedSelection.any { kept -> nodeById[kept]?.contains(node) == true }) {
+                return@forEach
+            }
+            normalizedSelection.removeAll { kept ->
+                nodeById[kept]?.let { node.contains(it) } == true
+            }
+            normalizedSelection.add(id)
+        }
+        selectedCategoryIds = normalizedSelection
+
+        // Drop counts for deleted and de-selected categories, then clamp every
+        // remaining value to the category's current subtree size.
+        val deSelectedIds = previousSelection - normalizedSelection
+        val currentCategoryIds = nodeById.keys
+        val retainedCounts = (requestedCounts - deSelectedIds)
+            .filterKeys { it in currentCategoryIds }
+            .toMutableMap()
+        nodes.forEach { node ->
+            val id = node.category.id
+            val available = node.category.totalQuestionCount
+            val raw = retainedCounts[id] ?: if (available == 0) "0" else "1"
+            val parsed = raw.trim().toIntOrNull()
+            retainedCounts[id] = if (parsed != null && parsed > available) {
+                available.toString()
+            } else {
+                raw
+            }
+        }
+        requestedCounts = retainedCounts
         syncSessionWithPaper(detail)
     }
 
@@ -1451,8 +1600,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ?: return@mapNotNull null
             sessionQuestion.copy(
                 categoryId = location.categoryId,
-                categoryName = location.path.lastOrNull()
-                    ?: sessionQuestion.categoryName,
+                // Match TestGenerator: the snapshot stores the full path, not
+                // just the leaf, so headers stay identical after a refresh.
+                categoryName = location.path.joinToString(" / "),
                 categoryPath = location.path,
                 questionText = location.question.questionText,
                 answerText = location.question.answerText,
@@ -1622,6 +1772,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         getApplication<Application>().cacheDir,
                         "exports"
                     ).apply { mkdirs() }
+                    // Share files are only needed for the current share sheet;
+                    // clear old ones so the cache does not grow without bound.
+                    directory.listFiles()?.forEach { old -> old.delete() }
                     val file = File(directory, request.fileName)
                     file.outputStream().use { stream ->
                         writeExport(pending, stream)
@@ -1746,6 +1899,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val SAMPLE_PAPER_ASSET = "sample-paper.json"
+        const val SAMPLE_PAPER_ID_KEY = "sample_paper_id"
         const val MAX_IMAGE_DIMENSION = 1400
         const val MAX_SOURCE_IMAGE_BYTES = 25 * 1024 * 1024
         const val MAX_STORED_IMAGE_BYTES = 1_200_000

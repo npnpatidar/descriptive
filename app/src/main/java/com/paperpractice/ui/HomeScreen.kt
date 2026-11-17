@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -87,6 +88,7 @@ import com.paperpractice.ui.theme.ThemeMode
 import com.paperpractice.ui.util.categoryCountLabel
 import com.paperpractice.ui.util.formatImportedAt
 import com.paperpractice.ui.util.questionCountLabel
+import com.paperpractice.ui.util.rememberSequentialReorder
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -135,13 +137,27 @@ fun HomeScreen(
     LaunchedEffect(viewModel.homeMessage) {
         val message = viewModel.homeMessage ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(message)
-        viewModel.clearHomeMessage()
+        // The message may have been consumed (and possibly replaced) while
+        // showSnackbar was suspended. Only clear it if it is still the one we
+        // displayed, so a newer message is not lost.
+        if (viewModel.homeMessage == message) {
+            viewModel.clearHomeMessage()
+        }
     }
 
     LaunchedEffect(viewModel.samplePaperToOpen) {
+        // Loading the sample sets homeMessage and samplePaperToOpen together.
+        // Only clear when a sample is actually being opened: clearing here
+        // unconditionally would swallow unrelated messages (e.g. "Removed the
+        // imported theme.") depending on LaunchedEffect declaration order.
+        val paperId = viewModel.consumeSamplePaperToOpen() ?: return@LaunchedEffect
+        // Clear synchronously, before the navigation below can cancel this
+        // effect, so the sample message cannot replay on a later visit.
+        // Opening the paper in Questions is confirmation enough.
+        viewModel.clearHomeMessage()
         // Open the question editor so the sample's rich text, tables, images,
         // formulas, and fractions are immediately visible.
-        viewModel.consumeSamplePaperToOpen()?.let(onOpenQuestions)
+        onOpenQuestions(paperId)
     }
 
     Scaffold(
@@ -252,7 +268,12 @@ fun HomeScreen(
             )
         },
         bottomBar = {
-            Surface(color = MaterialTheme.colorScheme.surface) {
+            // Material3's Scaffold does not apply insets to a custom
+            // bottomBar, so pad the footer above the system navigation bar.
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                modifier = Modifier.navigationBarsPadding()
+            ) {
                 // The running build's version, so a bug report names the
                 // release the user actually has.
                 Text(
@@ -332,15 +353,16 @@ fun HomeScreen(
                         items = papers,
                         key = { _, paper -> paper.id }
                     ) { index, paper ->
+                        val reorderPaperSteps = rememberSequentialReorder { delta ->
+                            viewModel.reorderPaper(paper.id, delta)
+                        }
                         PaperCard(
                             paper = paper,
                             canMoveUp = index > 0,
                             canMoveDown = index < papers.lastIndex,
                             onClick = { onOpenPaper(paper.id) },
                             onDelete = { paperToDelete = paper },
-                            onReorder = { delta ->
-                                scope.launch { viewModel.reorderPaper(paper.id, delta) }
-                            }
+                            onReorder = { delta -> reorderPaperSteps(delta) }
                         )
                     }
                 }
@@ -463,14 +485,21 @@ fun HomeScreen(
                     arrayOf("application/json", "text/plain", "application/octet-stream")
                 )
             },
-            onRemoveTheme = { themePendingRemoval = it },
+            onRemoveTheme = {
+                // Swap dialogs rather than stacking the confirmation on top.
+                showThemeDialog = false
+                themePendingRemoval = it
+            },
             onDismiss = { showThemeDialog = false }
         )
     }
 
     themePendingRemoval?.let { theme ->
         AlertDialog(
-            onDismissRequest = { themePendingRemoval = null },
+            onDismissRequest = {
+                themePendingRemoval = null
+                showThemeDialog = true
+            },
             icon = {
                 Icon(
                     Icons.Outlined.DeleteOutline,
@@ -485,13 +514,17 @@ fun HomeScreen(
                     onClick = {
                         viewModel.removeCustomTheme(theme.key)
                         themePendingRemoval = null
+                        showThemeDialog = true
                     }
                 ) {
                     Text("Remove", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { themePendingRemoval = null }) { Text("Cancel") }
+                TextButton(onClick = {
+                    themePendingRemoval = null
+                    showThemeDialog = true
+                }) { Text("Cancel") }
             }
         )
     }

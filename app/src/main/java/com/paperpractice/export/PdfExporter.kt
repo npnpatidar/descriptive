@@ -1,5 +1,6 @@
 package com.paperpractice.export
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
@@ -41,8 +42,12 @@ object PdfExporter {
         output: OutputStream
     ) {
         val document = PdfDocument()
+        // Bitmaps decoded while drawing pages are kept alive until the PDF has
+        // been fully written: SkPDF may retain a reference to their pixels on
+        // some API levels, so recycling them at draw time is unsafe.
+        val decodedBitmaps = mutableListOf<Bitmap>()
         try {
-            val writer = PageWriter(document, content.paperName)
+            val writer = PageWriter(document, content.paperName, decodedBitmaps)
             writer.drawTitle(content)
             if (content.categories.isEmpty()) {
                 writer.drawBody("This paper contains no categories.", spacingAfter = 12f)
@@ -104,6 +109,11 @@ object PdfExporter {
             document.writeTo(output)
         } finally {
             document.close()
+            // Safe now that finishPage/writeTo (and close) are done. Runs on
+            // failure paths too, so a failed export never leaks native pixels.
+            decodedBitmaps.forEach { bitmap ->
+                if (!bitmap.isRecycled) bitmap.recycle()
+            }
         }
     }
 
@@ -115,7 +125,8 @@ object PdfExporter {
 
     private class PageWriter(
         private val document: PdfDocument,
-        private val runningTitle: String
+        private val runningTitle: String,
+        private val decodedBitmaps: MutableList<Bitmap>
     ) {
         private val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(30, 36, 51)
@@ -272,6 +283,9 @@ object PdfExporter {
                     null
                 } ?: return@forEach
 
+                // Keep it alive until the whole PDF is written; the export
+                // method recycles every collected bitmap in its finally block.
+                decodedBitmaps += bitmap
                 if (bitmap.width <= 0 || bitmap.height <= 0) return@forEach
                 val maxWidth = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT
                 val maxHeight = min(300f, CONTENT_BOTTOM - MARGIN_TOP)
@@ -485,9 +499,14 @@ object PdfExporter {
             val tableWidth = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT - leftIndent
             val cellWidth = tableWidth / columnCount
             val cellPadding = 4f
+            val startX = MARGIN_LEFT + leftIndent
             val tablePaint = TextPaint(bodyPaint).apply {
                 textSize = 9.8f
             }
+            // Continuation pages carry the running header, so their writable
+            // area starts a little lower than the first page's does.
+            val continuationTop = MARGIN_TOP + 18f
+            val freshPageUsable = CONTENT_BOTTOM - continuationTop
 
             fun cellLayout(
                 cell: List<RichInline>,
@@ -514,28 +533,32 @@ object PdfExporter {
                     .build()
             }
 
-            fun drawRow(
+            fun layoutsFor(
                 cells: List<List<RichInline>>,
+                header: Boolean
+            ): List<StaticLayout> = (0 until columnCount).map { index ->
+                val cell = cells.getOrNull(index).orEmpty()
+                val alignment = when (table.alignments.getOrNull(index)) {
+                    ColumnAlignment.CENTER -> Layout.Alignment.ALIGN_CENTER
+                    ColumnAlignment.RIGHT -> Layout.Alignment.ALIGN_OPPOSITE
+                    else -> Layout.Alignment.ALIGN_NORMAL
+                }
+                cellLayout(cell, header, alignment)
+            }
+
+            fun rowHeightOf(layouts: List<StaticLayout>): Float =
+                (layouts.maxOfOrNull { it.height } ?: 0) + cellPadding * 2
+
+            // Draws a whole, already-laid-out row at the current y. The caller
+            // guarantees there is enough room for the entire row.
+            fun drawWholeRow(
+                layouts: List<StaticLayout>,
                 header: Boolean,
                 alternate: Boolean
             ) {
-                val layouts = (0 until columnCount).map { index ->
-                    val cell = cells.getOrNull(index).orEmpty()
-                    val alignment = when (table.alignments.getOrNull(index)) {
-                        ColumnAlignment.CENTER -> Layout.Alignment.ALIGN_CENTER
-                        ColumnAlignment.RIGHT -> Layout.Alignment.ALIGN_OPPOSITE
-                        else -> Layout.Alignment.ALIGN_NORMAL
-                    }
-                    cellLayout(cell, header, alignment)
-                }
-                val rowHeight = (layouts.maxOfOrNull { it.height } ?: 0) +
-                    cellPadding * 2
-                if (y + rowHeight > CONTENT_BOTTOM) {
-                    newPage()
-                }
+                val rowHeight = rowHeightOf(layouts)
                 val targetCanvas = ensurePage()
                 val rowTop = y
-                val startX = MARGIN_LEFT + leftIndent
                 layouts.forEachIndexed { index, cellLayoutValue ->
                     val cellX = startX + index * cellWidth
                     val backgroundPaint = when {
@@ -574,6 +597,127 @@ object PdfExporter {
                     )
                 }
                 y += rowHeight
+            }
+
+            // Draws one vertical slice of an over-long row into the band
+            // [bandTop, bandBottom) in page coordinates. `rowTop` is where the
+            // row conceptually starts; cell text is translated by
+            // rowTop + cellPadding and clipped to the band, so exactly the
+            // lines that fall inside this slice are painted and nothing is
+            // silently dropped. startLine/getLineBottom guard against drawing
+            // a cell that has no lines left in this slice.
+            fun drawRowSlice(
+                layouts: List<StaticLayout>,
+                rowTop: Float,
+                bandTop: Float,
+                bandBottom: Float,
+                header: Boolean,
+                alternate: Boolean
+            ) {
+                val targetCanvas = ensurePage()
+                val textStart = rowTop + cellPadding
+                val maxTextHeight = layouts.maxOfOrNull { it.height } ?: 0
+                val fromVertical = (bandTop - textStart).toInt().coerceAtLeast(0)
+                val toVertical = (bandBottom - textStart).toInt()
+                    .coerceAtLeast(0).coerceAtMost(maxTextHeight)
+                val backgroundPaint = when {
+                    header -> tableHeaderPaint
+                    alternate -> tableAlternatePaint
+                    else -> null
+                }
+                layouts.forEachIndexed { index, cellLayoutValue ->
+                    val cellX = startX + index * cellWidth
+                    if (backgroundPaint != null) {
+                        targetCanvas.drawRect(
+                            cellX + 0.5f,
+                            bandTop + 0.5f,
+                            cellX + cellWidth - 0.5f,
+                            bandBottom - 0.5f,
+                            backgroundPaint
+                        )
+                    }
+                    if (fromVertical < toVertical && toVertical > 0) {
+                        val startLine = cellLayoutValue.getLineForVertical(fromVertical)
+                        if (startLine < cellLayoutValue.lineCount &&
+                            cellLayoutValue.getLineBottom(startLine) > fromVertical
+                        ) {
+                            targetCanvas.save()
+                            targetCanvas.clipRect(
+                                cellX + cellPadding,
+                                bandTop,
+                                cellX + cellWidth - cellPadding,
+                                bandBottom
+                            )
+                            targetCanvas.translate(cellX + cellPadding, textStart)
+                            cellLayoutValue.draw(targetCanvas)
+                            targetCanvas.restore()
+                        }
+                    }
+                    targetCanvas.drawRect(
+                        cellX,
+                        bandTop,
+                        cellX + cellWidth,
+                        bandBottom,
+                        tableBorderPaint
+                    )
+                }
+            }
+
+            fun drawRow(
+                cells: List<List<RichInline>>,
+                header: Boolean,
+                alternate: Boolean
+            ) {
+                val layouts = layoutsFor(cells, header)
+                val rowHeight = rowHeightOf(layouts)
+                if (y + rowHeight <= CONTENT_BOTTOM) {
+                    // Normal row: unchanged behaviour.
+                    drawWholeRow(layouts, header, alternate)
+                    return
+                }
+                if (rowHeight <= freshPageUsable) {
+                    // Fits on a fresh page: keep the old "move the whole row"
+                    // behaviour instead of splitting it.
+                    newPage()
+                    drawWholeRow(layouts, header, alternate)
+                    return
+                }
+
+                // The row is taller than a page. Draw it slice by slice,
+                // repeating the table header at the top of every continuation
+                // page so the column meanings stay visible.
+                val headerLayouts = layoutsFor(table.headers, header = true)
+                val headerHeight = rowHeightOf(headerLayouts)
+                val repeatHeader = headerHeight < freshPageUsable - 4f
+                var offset = 0f
+                var needHeader = false
+                while (offset < rowHeight) {
+                    if (needHeader) {
+                        newPage()
+                        if (repeatHeader) {
+                            drawWholeRow(headerLayouts, header = true, alternate = false)
+                        }
+                        needHeader = false
+                    }
+                    val available = CONTENT_BOTTOM - y
+                    if (available <= 1f) {
+                        needHeader = true
+                        continue
+                    }
+                    val sliceHeight = min(available, rowHeight - offset)
+                    val rowTop = y - offset
+                    drawRowSlice(
+                        layouts = layouts,
+                        rowTop = rowTop,
+                        bandTop = y,
+                        bandBottom = y + sliceHeight,
+                        header = header,
+                        alternate = alternate
+                    )
+                    y += sliceHeight
+                    offset += sliceHeight
+                    if (offset < rowHeight) needHeader = true
+                }
             }
 
             if (y + 70f > CONTENT_BOTTOM) newPage()
@@ -658,7 +802,23 @@ object PdfExporter {
 
             if (pageNumber > 1) {
                 val drawCanvas = requireNotNull(canvas)
-                drawCanvas.drawText(runningTitle, MARGIN_LEFT, MARGIN_TOP - 12f, metaPaint)
+                // Keep the running header on one line. Long paper names are
+                // trimmed with an ellipsis so they never run off the right edge.
+                val availableWidth = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT
+                val fittedTitle = if (metaPaint.measureText(runningTitle) <= availableWidth) {
+                    runningTitle
+                } else {
+                    val ellipsis = "\u2026"
+                    val ellipsisWidth = metaPaint.measureText(ellipsis)
+                    var end = runningTitle.length
+                    while (end > 0 &&
+                        metaPaint.measureText(runningTitle.substring(0, end)) + ellipsisWidth > availableWidth
+                    ) {
+                        end--
+                    }
+                    runningTitle.substring(0, end) + ellipsis
+                }
+                drawCanvas.drawText(fittedTitle, MARGIN_LEFT, MARGIN_TOP - 12f, metaPaint)
                 drawCanvas.drawLine(
                     MARGIN_LEFT,
                     MARGIN_TOP,
