@@ -31,8 +31,8 @@ android {
         applicationId = "com.paperpractice"
         minSdk = 26
         targetSdk = 36
-        versionCode = 11
-        versionName = "2.4.2"
+        versionCode = 12
+        versionName = "2.5.0"
     }
 
     signingConfigs {
