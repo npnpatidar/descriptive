@@ -560,6 +560,53 @@ class ExportersTest {
         )
     }
 
+    @Test
+    fun docxExportsNestedFractionsAsRecursiveOmml() {
+        val nestedFraction = PaperContent(
+            paperName = "Fractions",
+            categories = listOf(
+                CategoryContent(
+                    categoryName = "Math",
+                    questions = listOf(
+                        QuestionContent(
+                            questionText = "Compute \\frac{1 + \\frac{1}{2}}{3}",
+                            answerText = ""
+                        )
+                    )
+                )
+            )
+        )
+
+        val bytes = ByteArrayOutputStream().also {
+            DocxExporter.write(
+                nestedFraction,
+                includeAnswers = true,
+                answersAtEnd = false,
+                output = it
+            )
+        }.toByteArray()
+
+        val document = unzip(bytes)["word/document.xml"] ?: error("document.xml missing")
+        val text = document.toString(Charsets.UTF_8)
+
+        assertTrue(text.contains("<m:oMath>"))
+        assertTrue(text.contains("<m:num>"))
+        assertTrue(text.contains("<m:den>"))
+        // One fraction expression with a nested fraction must produce two
+        // m:f nodes, with the inner one sitting inside the outer numerator.
+        assertEquals(2, Regex("<m:f>").findAll(text).count())
+        val outerNum = text.indexOf("<m:f><m:num>")
+        val innerFraction = text.indexOf("<m:f>", outerNum + 1)
+        val outerNumClose = text.indexOf("</m:num>", outerNum)
+        assertTrue(innerFraction in (outerNum + 1) until outerNumClose)
+
+        val factory = DocumentBuilderFactory.newInstance()
+        factory.isNamespaceAware = true
+        val parsed = factory.newDocumentBuilder()
+            .parse(ByteArrayInputStream(document))
+        assertEquals("document", parsed.documentElement.localName)
+    }
+
     private fun unzip(bytes: ByteArray): Map<String, ByteArray> {
         val result = linkedMapOf<String, ByteArray>()
         ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->

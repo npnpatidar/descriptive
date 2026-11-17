@@ -1,5 +1,6 @@
 package com.paperpractice.domain
 
+import java.util.Base64
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -226,6 +227,116 @@ class PaperJsonParserTest {
     fun rejectsEmptyFile() {
         val message = failureMessage("   ")
         assertTrue(message.contains("empty", ignoreCase = true))
+    }
+
+    @Test
+    fun acceptsExactlySixtyFourNestedCategoryLevels() {
+        val paper = PaperJsonParser.parse(nestedCategoryPaper(64))
+
+        assertEquals(64, paper.categoryCount)
+    }
+
+    @Test
+    fun rejectsSixtyFiveNestedCategoryLevels() {
+        val message = failureMessage(nestedCategoryPaper(65))
+
+        assertTrue(message.contains("nested more than 64 levels"))
+    }
+
+    @Test
+    fun headerDimensionsWinOverConflictingDeclaredSize() {
+        val image = parseImage(imageJson(pngHeader(640, 480), 11, 22))
+
+        assertEquals(640, image.width)
+        assertEquals(480, image.height)
+    }
+
+    @Test
+    fun declaredSizeIsUsedOnlyWhenBothDimensionsAndNoHeaderExist() {
+        val unknownBytes = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+
+        val withBoth = parseImage(imageJson(unknownBytes, 11, 22))
+        assertEquals(11, withBoth.width)
+        assertEquals(22, withBoth.height)
+
+        val withOnlyWidth = parseImage(imageJson(unknownBytes, 11, null))
+        assertEquals(0, withOnlyWidth.width)
+        assertEquals(0, withOnlyWidth.height)
+
+        val withOnlyHeight = parseImage(imageJson(unknownBytes, null, 22))
+        assertEquals(0, withOnlyHeight.width)
+        assertEquals(0, withOnlyHeight.height)
+    }
+
+    @Test
+    fun singleDeclaredDimensionDoesNotOverrideInferredHeader() {
+        val image = parseImage(imageJson(pngHeader(640, 480), 11, null))
+
+        assertEquals(640, image.width)
+        assertEquals(480, image.height)
+    }
+
+    private fun nestedCategoryPaper(levels: Int): String {
+        var category = """{"categoryName":"C","questions":[]}"""
+        repeat(levels - 1) {
+            category = """{"categoryName":"C","questions":[],"categories":[$category]}"""
+        }
+        return """{"paperName":"Deep","categories":[$category]}"""
+    }
+
+    private fun imageJson(
+        bytes: ByteArray,
+        declaredWidth: Int?,
+        declaredHeight: Int?
+    ): String {
+        val encoded = Base64.getEncoder().encodeToString(bytes)
+        val sizeFields = buildString {
+            if (declaredWidth != null) append(",\"width\":$declaredWidth")
+            if (declaredHeight != null) append(",\"height\":$declaredHeight")
+        }
+        return """
+            {
+              "paperName": "P",
+              "categories": [
+                {
+                  "categoryName": "C",
+                  "questions": [
+                    {
+                      "questionText": "Q",
+                      "answerText": "",
+                      "questionImages": [
+                        {"mimeType": "image/png", "data": "$encoded"$sizeFields}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+        """.trimIndent()
+    }
+
+    private fun parseImage(json: String): ImageContent =
+        PaperJsonParser.parse(json)
+            .categories.first()
+            .questions.first()
+            .questionImages.single()
+
+    private fun pngHeader(width: Int, height: Int): ByteArray {
+        val bytes = ByteArray(24)
+        byteArrayOf(
+            0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+            0x00, 0x00, 0x00, 0x0D,
+            0x49, 0x48, 0x44, 0x52
+        ).copyInto(bytes)
+        bytes[16] = (width ushr 24).toByte()
+        bytes[17] = (width ushr 16).toByte()
+        bytes[18] = (width ushr 8).toByte()
+        bytes[19] = width.toByte()
+        bytes[20] = (height ushr 24).toByte()
+        bytes[21] = (height ushr 16).toByte()
+        bytes[22] = (height ushr 8).toByte()
+        bytes[23] = height.toByte()
+        return bytes
     }
 
     private fun failureMessage(json: String): String {

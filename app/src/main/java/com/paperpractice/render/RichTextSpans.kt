@@ -12,7 +12,6 @@ import android.text.style.StyleSpan
 import android.text.style.UnderlineSpan
 import com.paperpractice.domain.RichInline
 import com.paperpractice.domain.RichInlineStyle
-import com.paperpractice.domain.RichText
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
@@ -64,12 +63,14 @@ object RichTextSpans {
                         } else {
                             node.style
                         }
+                        // Keep the RichInline children so the fraction renderer
+                        // can lay out nested fractions and styles recursively.
                         spans += SpanRange.FractionSpan(
                             start = start,
                             end = end,
                             style = style,
-                            numerator = RichText.plain(node.numerator),
-                            denominator = RichText.plain(node.denominator)
+                            numerator = node.numerator,
+                            denominator = node.denominator
                         )
                         hasFractions = true
                     }
@@ -164,14 +165,19 @@ object RichTextSpans {
             override val start: Int,
             override val end: Int,
             val style: RichInlineStyle,
-            val numerator: String,
-            val denominator: String
+            val numerator: List<RichInline>,
+            val denominator: List<RichInline>
         ) : SpanRange
     }
 
+    /**
+     * Draws a stacked fraction from its child [RichInline] lists instead of two
+     * flattened Strings. Each child is measured and drawn with its own style,
+     * and nested [RichInline.Fraction] nodes recurse through the same renderer.
+     */
     private class FractionSpan(
-        private val numerator: String,
-        private val denominator: String,
+        private val numerator: List<RichInline>,
+        private val denominator: List<RichInline>,
         private val style: RichInlineStyle,
         private val textColor: Int,
         private val highlightColor: Int
@@ -188,12 +194,7 @@ object RichTextSpans {
             val originalTypeface = paint.typeface
             val originalColor = paint.color
             try {
-                paint.textSize = originalSize * FRACTION_SCALE
-                paint.typeface = typefaceFor(originalTypeface, style)
-                val width = max(
-                    paint.measureText(numerator),
-                    paint.measureText(denominator)
-                ) + originalSize * 0.45f
+                val width = fractionWidth(paint, originalSize, originalTypeface, style.bold)
                 fm?.let { metrics ->
                     // The fraction is drawn above and below the normal text
                     // baseline. Tell TextView about that extra extent so its
@@ -227,38 +228,23 @@ object RichTextSpans {
             val originalTypeface = paint.typeface
             val originalColor = paint.color
             try {
-                paint.textSize = originalSize * FRACTION_SCALE
-                paint.typeface = typefaceFor(originalTypeface, style)
-                val width = max(
-                    paint.measureText(numerator),
-                    paint.measureText(denominator)
-                ) + originalSize * 0.45f
                 val barY = (top + bottom) / 2f
+                val width = fractionWidth(paint, originalSize, originalTypeface, style.bold)
                 if (style.highlight) {
                     paint.color = highlightColor
                     canvas.drawRect(x, top.toFloat(), x + width, bottom.toFloat(), paint)
                 }
                 paint.color = textColor
-                val numeratorWidth = paint.measureText(numerator)
-                val denominatorWidth = paint.measureText(denominator)
-                canvas.drawText(
-                    numerator,
-                    x + (width - numeratorWidth) / 2f,
-                    barY - originalSize * 0.16f,
-                    paint
-                )
-                canvas.drawLine(
-                    x + originalSize * 0.12f,
-                    barY,
-                    x + width - originalSize * 0.12f,
-                    barY,
-                    paint
-                )
-                canvas.drawText(
-                    denominator,
-                    x + (width - denominatorWidth) / 2f,
-                    barY + originalSize * 0.70f,
-                    paint
+                drawFraction(
+                    paint = paint,
+                    canvas = canvas,
+                    numerator = numerator,
+                    denominator = denominator,
+                    textSize = originalSize,
+                    baseTypeface = originalTypeface,
+                    x = x,
+                    barY = barY,
+                    inheritedBold = style.bold
                 )
             } finally {
                 paint.textSize = originalSize
@@ -267,10 +253,180 @@ object RichTextSpans {
             }
         }
 
-        private fun typefaceFor(base: Typeface?, style: RichInlineStyle): Typeface {
+        private fun fractionWidth(
+            paint: Paint,
+            textSize: Float,
+            baseTypeface: Typeface?,
+            inheritedBold: Boolean
+        ): Float {
+            val childSize = textSize * FRACTION_SCALE
+            return max(
+                measureInlines(paint, numerator, childSize, baseTypeface, inheritedBold),
+                measureInlines(paint, denominator, childSize, baseTypeface, inheritedBold)
+            ) + textSize * 0.45f
+        }
+
+        private fun measureInlines(
+            paint: Paint,
+            nodes: List<RichInline>,
+            textSize: Float,
+            baseTypeface: Typeface?,
+            inheritedBold: Boolean
+        ): Float {
+            var width = 0f
+            nodes.forEach { node ->
+                when (node) {
+                    is RichInline.Text -> {
+                        if (node.text.isEmpty()) return@forEach
+                        preparePaint(paint, textSize, baseTypeface, node.style, inheritedBold)
+                        width += paint.measureText(node.text)
+                    }
+                    is RichInline.Fraction -> {
+                        val childSize = textSize * FRACTION_SCALE
+                        val bold = inheritedBold || node.style.bold
+                        width += max(
+                            measureInlines(paint, node.numerator, childSize, baseTypeface, bold),
+                            measureInlines(paint, node.denominator, childSize, baseTypeface, bold)
+                        ) + textSize * 0.45f
+                    }
+                }
+            }
+            return width
+        }
+
+        private fun drawInlines(
+            paint: Paint,
+            canvas: Canvas,
+            nodes: List<RichInline>,
+            textSize: Float,
+            baseTypeface: Typeface?,
+            x: Float,
+            baseline: Float,
+            inheritedBold: Boolean
+        ): Float {
+            var cursor = x
+            nodes.forEach { node ->
+                when (node) {
+                    is RichInline.Text -> {
+                        if (node.text.isEmpty()) return@forEach
+                        preparePaint(paint, textSize, baseTypeface, node.style, inheritedBold)
+                        val nodeWidth = paint.measureText(node.text)
+                        if (node.style.highlight) {
+                            paint.color = highlightColor
+                            canvas.drawRect(
+                                cursor,
+                                baseline - textSize * 0.80f,
+                                cursor + nodeWidth,
+                                baseline + textSize * 0.20f,
+                                paint
+                            )
+                            paint.color = textColor
+                        }
+                        canvas.drawText(node.text, cursor, baseline, paint)
+                        if (node.style.underline) {
+                            canvas.drawLine(
+                                cursor, baseline + textSize * 0.10f,
+                                cursor + nodeWidth, baseline + textSize * 0.10f, paint
+                            )
+                        }
+                        if (node.style.strikethrough) {
+                            canvas.drawLine(
+                                cursor, baseline - textSize * 0.26f,
+                                cursor + nodeWidth, baseline - textSize * 0.26f, paint
+                            )
+                        }
+                        cursor += nodeWidth
+                    }
+                    is RichInline.Fraction -> {
+                        val childSize = textSize * FRACTION_SCALE
+                        val bold = inheritedBold || node.style.bold
+                        val numWidth = measureInlines(
+                            paint, node.numerator, childSize, baseTypeface, bold
+                        )
+                        val denWidth = measureInlines(
+                            paint, node.denominator, childSize, baseTypeface, bold
+                        )
+                        val width = max(numWidth, denWidth) + textSize * 0.45f
+                        val nestedX = cursor + (width - numWidth) / 2f
+                        val nestedBarY = baseline - textSize * 0.18f
+                        if (node.style.highlight) {
+                            paint.color = highlightColor
+                            canvas.drawRect(
+                                cursor, nestedBarY - childSize,
+                                cursor + width, nestedBarY + childSize, paint
+                            )
+                        }
+                        paint.color = textColor
+                        drawFraction(
+                            paint = paint,
+                            canvas = canvas,
+                            numerator = node.numerator,
+                            denominator = node.denominator,
+                            textSize = textSize,
+                            baseTypeface = baseTypeface,
+                            x = nestedX,
+                            barY = nestedBarY,
+                            inheritedBold = bold
+                        )
+                        cursor += width
+                    }
+                }
+            }
+            return cursor
+        }
+
+        private fun drawFraction(
+            paint: Paint,
+            canvas: Canvas,
+            numerator: List<RichInline>,
+            denominator: List<RichInline>,
+            textSize: Float,
+            baseTypeface: Typeface?,
+            x: Float,
+            barY: Float,
+            inheritedBold: Boolean
+        ) {
+            val childSize = textSize * FRACTION_SCALE
+            val numWidth = measureInlines(paint, numerator, childSize, baseTypeface, inheritedBold)
+            val denWidth = measureInlines(paint, denominator, childSize, baseTypeface, inheritedBold)
+            val width = max(numWidth, denWidth) + textSize * 0.45f
+
+            drawInlines(
+                paint, canvas, numerator, childSize, baseTypeface,
+                x + (width - numWidth) / 2f, barY - textSize * 0.16f, inheritedBold
+            )
+            paint.color = textColor
+            canvas.drawLine(
+                x + textSize * 0.12f, barY,
+                x + width - textSize * 0.12f, barY, paint
+            )
+            drawInlines(
+                paint, canvas, denominator, childSize, baseTypeface,
+                x + (width - denWidth) / 2f, barY + textSize * 0.70f, inheritedBold
+            )
+        }
+
+        private fun preparePaint(
+            paint: Paint,
+            textSize: Float,
+            baseTypeface: Typeface?,
+            style: RichInlineStyle,
+            inheritedBold: Boolean
+        ) {
+            paint.textSize = textSize
+            paint.color = textColor
+            paint.typeface = typefaceFor(baseTypeface, style, inheritedBold)
+        }
+
+        private fun typefaceFor(
+            base: Typeface?,
+            style: RichInlineStyle,
+            inheritedBold: Boolean
+        ): Typeface {
+            val bold = style.bold || inheritedBold
             val typefaceStyle = when {
-                style.bold && style.italic -> Typeface.BOLD_ITALIC
-                style.bold -> Typeface.BOLD
+                bold && style.italic -> Typeface.BOLD_ITALIC
+                bold -> Typeface.BOLD
                 style.italic -> Typeface.ITALIC
                 else -> Typeface.NORMAL
             }

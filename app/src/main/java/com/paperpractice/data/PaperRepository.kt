@@ -30,20 +30,53 @@ class PaperRepository(private val database: AppDatabase) {
         contents: List<PaperContent>,
         mode: ImportMode
     ): List<ImportedPaper> = database.withTransaction {
-        contents.map { importPaperInternal(it, mode) }
+        // Snapshot the papers that exist before the batch starts. A paper
+        // inserted by an earlier iteration must never be mistaken for a
+        // pre-existing name conflict (KEEP_BOTH duplicates in a backup).
+        val existingByName = mutableMapOf<String, PaperEntity>()
+        dao.findPapers().forEach { paper ->
+            val key = normalize(paper.name)
+            if (!existingByName.containsKey(key)) existingByName[key] = paper
+        }
+        // Names created by this batch are always inserted as new papers; only
+        // the pre-batch snapshot may decide a MERGE/REPLACE conflict.
+        val createdNames = mutableSetOf<String>()
+        contents.map { content ->
+            val result = importPaperInternal(content, mode, existingByName, createdNames)
+            createdNames += normalize(content.paperName)
+            result
+        }
     }
 
-    suspend fun existingPaperNames(names: Collection<String>): Set<String> =
-        names.mapNotNull { dao.findPaperByName(it)?.name }.toSet()
+    suspend fun existingPaperNames(names: Collection<String>): Set<String> {
+        val papers = dao.findPapers()
+        return names.mapNotNull { name ->
+            papers.firstOrNull { normalize(it.name) == normalize(name) }?.name
+        }.toSet()
+    }
 
     suspend fun findPaperIdByName(name: String): String? =
-        dao.findPaperByName(name)?.id
+        findMatchingPaper(name)?.id
+
+    /**
+     * Name identity is decided in Kotlin with [normalize] (Unicode-aware),
+     * not with SQL lower(), which only folds ASCII characters.
+     */
+    private suspend fun findMatchingPaper(name: String): PaperEntity? =
+        dao.findPapers().firstOrNull { normalize(it.name) == normalize(name) }
 
     private suspend fun importPaperInternal(
         content: PaperContent,
-        mode: ImportMode
+        mode: ImportMode,
+        existingByName: Map<String, PaperEntity>? = null,
+        createdNames: Set<String>? = null
     ): ImportedPaper {
-        val existing = dao.findPaperByName(content.paperName)
+        val normalizedName = normalize(content.paperName)
+        val existing = when {
+            createdNames?.contains(normalizedName) == true -> null
+            existingByName != null -> existingByName[normalizedName]
+            else -> findMatchingPaper(content.paperName)
+        }
         val paperId = when {
             existing == null || mode == ImportMode.KEEP_BOTH -> insertNewPaper(content)
 
@@ -174,7 +207,7 @@ class PaperRepository(private val database: AppDatabase) {
                     if (question.answerText.isNotBlank() &&
                         match.answerText != question.answerText
                     ) {
-                        dao.updateQuestion(match.id, question.questionText, question.answerText)
+                        dao.updateQuestionAnswer(match.id, question.answerText)
                     }
                     if (question.questionImages.isNotEmpty()) {
                         replaceImages(match.id, TARGET_QUESTION, question.questionImages)
@@ -193,7 +226,7 @@ class PaperRepository(private val database: AppDatabase) {
         content.categories.forEach { mergeCategory(it, null) }
     }
 
-    suspend fun createPaper(name: String): PaperDetail {
+    suspend fun createPaper(name: String): PaperDetail = database.withTransaction {
         val paperId = UUID.randomUUID().toString()
         dao.insertPaper(
             PaperEntity(
@@ -203,7 +236,7 @@ class PaperRepository(private val database: AppDatabase) {
                 position = dao.nextPaperPosition()
             )
         )
-        return requireNotNull(getPaper(paperId)) {
+        requireNotNull(getPaper(paperId)) {
             "The new paper could not be read back from the database."
         }
     }
@@ -214,23 +247,25 @@ class PaperRepository(private val database: AppDatabase) {
     }
 
     suspend fun addCategory(paperId: String, name: String, parentId: String? = null) {
-        if (parentId != null) {
-            val parent = dao.findCategory(parentId)
-                ?: error("The parent category could not be found.")
-            check(parent.paperId == paperId) {
-                "The parent category belongs to a different paper."
+        database.withTransaction {
+            if (parentId != null) {
+                val parent = dao.findCategory(parentId)
+                    ?: error("The parent category could not be found.")
+                check(parent.paperId == paperId) {
+                    "The parent category belongs to a different paper."
+                }
             }
-        }
 
-        dao.insertCategory(
-            CategoryEntity(
-                id = UUID.randomUUID().toString(),
-                paperId = paperId,
-                name = name,
-                position = dao.nextCategoryPosition(paperId, parentId),
-                parentId = parentId
+            dao.insertCategory(
+                CategoryEntity(
+                    id = UUID.randomUUID().toString(),
+                    paperId = paperId,
+                    name = name,
+                    position = dao.nextCategoryPosition(paperId, parentId),
+                    parentId = parentId
+                )
             )
-        )
+        }
     }
 
     suspend fun renameCategory(categoryId: String, name: String) {
@@ -250,8 +285,8 @@ class PaperRepository(private val database: AppDatabase) {
     suspend fun getPaper(
         paperId: String,
         includeImages: Boolean = true
-    ): PaperDetail? {
-        val paper = dao.findPaper(paperId) ?: return null
+    ): PaperDetail? = database.withTransaction {
+        val paper = dao.findPaper(paperId) ?: return@withTransaction null
         val categories = dao.findCategories(paperId)
         val questionsByCategory = dao.findQuestions(paperId).groupBy { it.categoryId }
         val categoriesByParent = categories.groupBy { it.parentId }
@@ -293,7 +328,7 @@ class PaperRepository(private val database: AppDatabase) {
                 .map(::buildCategory)
         )
 
-        return PaperDetail(
+        PaperDetail(
             id = paper.id,
             name = paper.name,
             categories = categoriesByParent[null].orEmpty().map(::buildCategory)

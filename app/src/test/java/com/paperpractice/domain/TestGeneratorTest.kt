@@ -247,6 +247,134 @@ class TestGeneratorTest {
         )
     }
 
+    @Test
+    fun overlappingAncestorAndDescendantSelectionsKeepAncestorAndDoNotDoubleCount() {
+        // Selecting both a parent and its child must keep only the parent. The
+        // child's requested count is ignored entirely (it would be impossible
+        // for the child alone), and questions in the shared subtree are counted
+        // once rather than twice.
+        val nestedPaper = PaperDetail(
+            id = "paper-overlap",
+            name = "Overlap",
+            categories = listOf(
+                CategoryDetail(
+                    id = "science",
+                    name = "Science",
+                    questions = listOf(QuestionDetail("s1", "Parent?", "A")),
+                    children = listOf(
+                        CategoryDetail(
+                            id = "physics",
+                            name = "Physics",
+                            questions = listOf(
+                                QuestionDetail("p1", "Child one?", "B"),
+                                QuestionDetail("p2", "Child two?", "C")
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        val session = TestGenerator.generate(
+            paper = nestedPaper,
+            selectedCategoryIds = setOf("science", "physics"),
+            requestedCounts = mapOf("science" to 3, "physics" to 999),
+            random = Random(7)
+        )
+
+        assertEquals(3, session.questions.size)
+        assertEquals(
+            setOf("s1", "p1", "p2"),
+            session.questions.map { it.questionId }.toSet()
+        )
+        // Each distinct question appears exactly once: no double counting.
+        assertEquals(3, session.questions.map { it.questionId }.distinct().size)
+
+        // Selecting the ancestor alone yields exactly the same set of questions.
+        val ancestorOnly = TestGenerator.generate(
+            paper = nestedPaper,
+            selectedCategoryIds = setOf("science"),
+            requestedCounts = mapOf("science" to 3),
+            random = Random(7)
+        )
+        assertEquals(
+            ancestorOnly.questions.map { it.questionId }.toSet(),
+            session.questions.map { it.questionId }.toSet()
+        )
+    }
+
+    @Test
+    fun siblingSubtreesSharingDuplicateIdsEachReachRequestedCount() {
+        // "shared" appears in both sibling categories. The global used-id set
+        // must still let each sibling reach its requested count where possible,
+        // with the shared id consumed only once.
+        val sharedPaper = PaperDetail(
+            id = "paper-shared",
+            name = "Shared",
+            categories = listOf(
+                CategoryDetail(
+                    id = "a",
+                    name = "A",
+                    questions = listOf(
+                        QuestionDetail("shared", "A shared?", "a-shared"),
+                        QuestionDetail("a2", "A extra?", "a-extra")
+                    )
+                ),
+                CategoryDetail(
+                    id = "b",
+                    name = "B",
+                    questions = listOf(
+                        QuestionDetail("shared", "B shared?", "b-shared"),
+                        QuestionDetail("b2", "B extra?", "b-extra")
+                    )
+                )
+            )
+        )
+
+        val session = TestGenerator.generate(
+            paper = sharedPaper,
+            selectedCategoryIds = setOf("a", "b"),
+            requestedCounts = mapOf("a" to 2, "b" to 1),
+            random = Random(7)
+        )
+
+        assertEquals(3, session.questions.size)
+        assertEquals(2, session.questions.count { it.categoryId == "a" })
+        assertEquals(1, session.questions.count { it.categoryId == "b" })
+        assertEquals(3, session.questions.map { it.questionId }.distinct().size)
+        assertEquals(1, session.questions.count { it.questionId == "shared" })
+    }
+
+    @Test
+    fun duplicateQuestionRowsDoNotInflateAvailableCount() {
+        // Validation counts distinct ids, not rows. Three rows with only two
+        // distinct ids cannot satisfy a request of three: sampling would filter
+        // the duplicate and silently under-fill, so it is rejected up front.
+        val duplicatePaper = PaperDetail(
+            id = "paper-dupes",
+            name = "Dupes",
+            categories = listOf(
+                CategoryDetail(
+                    id = "a",
+                    name = "A",
+                    questions = listOf(
+                        QuestionDetail("dup", "First?", "A1"),
+                        QuestionDetail("dup", "Duplicate row?", "A2"),
+                        QuestionDetail("other", "Other?", "A3")
+                    )
+                )
+            )
+        )
+
+        expectFailure {
+            TestGenerator.generate(
+                paper = duplicatePaper,
+                selectedCategoryIds = setOf("a"),
+                requestedCounts = mapOf("a" to 3)
+            )
+        }
+    }
+
     private fun expectFailure(block: () -> Unit) {
         try {
             block()

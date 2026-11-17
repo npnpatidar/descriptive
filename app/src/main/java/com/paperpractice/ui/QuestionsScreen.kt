@@ -68,6 +68,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -89,6 +91,7 @@ import com.paperpractice.domain.ImageContent
 import com.paperpractice.ui.util.categoryCountLabel
 import com.paperpractice.ui.util.decodeImageForDisplay
 import com.paperpractice.ui.util.questionCountLabel
+import com.paperpractice.ui.util.rememberSequentialReorder
 import kotlinx.coroutines.launch
 
 private data class QuestionEditorState(
@@ -109,6 +112,79 @@ private data class AddCategoryTarget(
     val parentName: String?
 )
 
+// Savers keep transient editor/selection state across rotation. Image bytes
+// are deliberately excluded here: they live in the ViewModel (see
+// MainViewModel.setEditorImages) to stay out of the saved-state Bundle.
+private val stringSetSaver = listSaver<Set<String>, String>(
+    save = { it.toList() },
+    restore = { it.toSet() }
+)
+
+private val nullableStringSetSaver = Saver<Set<String>?, List<Any>>(
+    save = { value -> value?.toList() ?: emptyList() },
+    restore = { value ->
+        value.takeIf { it.isNotEmpty() }?.map { it as String }?.toSet()
+    }
+)
+
+private val questionEditorSaver = Saver<QuestionEditorState?, List<Any>>(
+    save = { value ->
+        if (value == null) {
+            emptyList()
+        } else {
+            listOf(
+                value.categoryId,
+                value.categoryName,
+                value.questionId ?: "",
+                value.questionText,
+                value.answerText
+            )
+        }
+    },
+    restore = { value ->
+        if (value.size < 5) {
+            null
+        } else {
+            QuestionEditorState(
+                categoryId = value[0] as String,
+                categoryName = value[1] as String,
+                questionId = (value[2] as String).ifBlank { null },
+                questionText = value[3] as String,
+                answerText = value[4] as String
+            )
+        }
+    }
+)
+
+private val addCategoryTargetSaver = Saver<AddCategoryTarget?, List<Any>>(
+    save = { value ->
+        if (value == null) {
+            emptyList()
+        } else {
+            listOf(value.parentId ?: "", value.parentName ?: "")
+        }
+    },
+    restore = { value ->
+        if (value.size < 2) {
+            null
+        } else {
+            AddCategoryTarget(
+                parentId = (value[0] as String).ifBlank { null },
+                parentName = (value[1] as String).ifBlank { null }
+            )
+        }
+    }
+)
+
+/** Category targets are restored by id from the paper already in the ViewModel. */
+private fun categorySaver(paper: PaperDetail?) = Saver<CategoryDetail?, List<Any>>(
+    save = { value -> if (value == null) emptyList() else listOf(value.id) },
+    restore = { value ->
+        val id = value.firstOrNull() as? String
+        id?.let { paper?.findCategory(it) }
+    }
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuestionsScreen(
@@ -123,27 +199,58 @@ fun QuestionsScreen(
     val paper = viewModel.selectedPaper?.takeIf { it.id == paperId }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    var editor by remember { mutableStateOf<QuestionEditorState?>(null) }
-    var deleteTarget by remember { mutableStateOf<QuestionEditorState?>(null) }
-    var addCategoryTarget by remember { mutableStateOf<AddCategoryTarget?>(null) }
-    var categoryToRename by remember { mutableStateOf<CategoryDetail?>(null) }
-    var categoryToDelete by remember { mutableStateOf<CategoryDetail?>(null) }
-    var showRenamePaper by remember { mutableStateOf(false) }
-    var paperMenuOpen by remember { mutableStateOf(false) }
-    var expandedCategoryIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var selectionMode by remember { mutableStateOf(false) }
-    var selectedQuestionIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var moveQuestionsTarget by remember { mutableStateOf<Set<String>?>(null) }
-    var categoryToMove by remember { mutableStateOf<CategoryDetail?>(null) }
-    var categoryToReparent by remember { mutableStateOf<CategoryDetail?>(null) }
-    var categoryToMerge by remember { mutableStateOf<CategoryDetail?>(null) }
-    var confirmBulkDelete by remember { mutableStateOf(false) }
-    var confirmMergeDuplicates by remember { mutableStateOf(false) }
-    var focusedCategoryId by remember { mutableStateOf<String?>(null) }
-    var focusedQuestionId by remember { mutableStateOf<String?>(null) }
+
+    var editor by rememberSaveable(
+        key = viewModel.uiSessionToken,
+        stateSaver = questionEditorSaver
+    ) {
+        mutableStateOf<QuestionEditorState?>(null)
+    }
+    var deleteTarget by rememberSaveable(stateSaver = questionEditorSaver) {
+        mutableStateOf<QuestionEditorState?>(null)
+    }
+    var addCategoryTarget by rememberSaveable(stateSaver = addCategoryTargetSaver) {
+        mutableStateOf<AddCategoryTarget?>(null)
+    }
+    var categoryToRename by rememberSaveable(stateSaver = categorySaver(paper)) {
+        mutableStateOf<CategoryDetail?>(null)
+    }
+    var categoryToDelete by rememberSaveable(stateSaver = categorySaver(paper)) {
+        mutableStateOf<CategoryDetail?>(null)
+    }
+    var showRenamePaper by rememberSaveable { mutableStateOf(false) }
+    var paperMenuOpen by rememberSaveable { mutableStateOf(false) }
+    var expandedCategoryIds by rememberSaveable(stateSaver = stringSetSaver) {
+        mutableStateOf<Set<String>>(emptySet())
+    }
+    var selectionMode by rememberSaveable { mutableStateOf(false) }
+    var selectedQuestionIds by rememberSaveable(stateSaver = stringSetSaver) {
+        mutableStateOf<Set<String>>(emptySet())
+    }
+    var moveQuestionsTarget by rememberSaveable(stateSaver = nullableStringSetSaver) {
+        mutableStateOf<Set<String>?>(null)
+    }
+    var categoryToMove by rememberSaveable(stateSaver = categorySaver(paper)) {
+        mutableStateOf<CategoryDetail?>(null)
+    }
+    var categoryToReparent by rememberSaveable(stateSaver = categorySaver(paper)) {
+        mutableStateOf<CategoryDetail?>(null)
+    }
+    var categoryToMerge by rememberSaveable(stateSaver = categorySaver(paper)) {
+        mutableStateOf<CategoryDetail?>(null)
+    }
+    var confirmBulkDelete by rememberSaveable { mutableStateOf(false) }
+    var confirmMergeDuplicates by rememberSaveable { mutableStateOf(false) }
+    var focusedCategoryId by rememberSaveable { mutableStateOf<String?>(null) }
+    var focusedQuestionId by rememberSaveable { mutableStateOf<String?>(null) }
+    var lastLoadedPaperId by rememberSaveable { mutableStateOf<String?>(null) }
     val allPapers by viewModel.papers.collectAsStateWithLifecycle()
 
     LaunchedEffect(paper?.id) {
+        // Recomposition after rotation recreates this effect with the same
+        // paper; keep the restored selection/focus instead of clearing it.
+        if (paper?.id != null && lastLoadedPaperId == paper.id) return@LaunchedEffect
+        lastLoadedPaperId = paper?.id
         selectionMode = false
         selectedQuestionIds = emptySet()
         focusedCategoryId = null
@@ -353,6 +460,7 @@ fun QuestionsScreen(
 
             else -> {
                 QuestionsContent(
+                    viewModel = viewModel,
                     paper = paper,
                     selectionMode = selectionMode,
                     selectedQuestionIds = selectedQuestionIds,
@@ -369,16 +477,6 @@ fun QuestionsScreen(
                     onMoveCategory = { category -> categoryToMove = category },
                     onReparentCategory = { category -> categoryToReparent = category },
                     onMergeCategory = { category -> categoryToMerge = category },
-                    onReorderQuestion = { question, delta ->
-                        scope.launch {
-                            viewModel.reorderQuestion(question.id, delta)
-                        }
-                    },
-                    onReorderCategory = { category, delta ->
-                        scope.launch {
-                            viewModel.reorderCategory(category.id, delta)
-                        }
-                    },
                     onEditQuestion = { node, question ->
                         if (selectionMode) {
                             selectedQuestionIds = if (question.id in selectedQuestionIds) {
@@ -387,6 +485,11 @@ fun QuestionsScreen(
                                 selectedQuestionIds + question.id
                             }
                         } else {
+                            viewModel.clearImageError()
+                            viewModel.setEditorImages(
+                                question.questionImages,
+                                question.answerImages
+                            )
                             editor = QuestionEditorState(
                                 categoryId = node.category.id,
                                 categoryName = node.displayName,
@@ -400,6 +503,8 @@ fun QuestionsScreen(
                     },
                     onAddQuestion = { node ->
                         expandedCategoryIds = expandedCategoryIds + node.category.id
+                        viewModel.clearImageError()
+                        viewModel.setEditorImages(emptyList(), emptyList())
                         editor = QuestionEditorState(
                             categoryId = node.category.id,
                             categoryName = node.displayName,
@@ -439,9 +544,15 @@ fun QuestionsScreen(
     if (currentEditor != null) {
         QuestionEditorDialog(
             state = currentEditor,
-            onDismiss = { editor = null },
+            onDismiss = {
+                editor = null
+                viewModel.clearImageError()
+                viewModel.setEditorImages(emptyList(), emptyList())
+            },
             onSaved = { wasNew ->
                 editor = null
+                viewModel.clearImageError()
+                viewModel.setEditorImages(emptyList(), emptyList())
                 scope.launch {
                     snackbarHostState.showSnackbar(
                         if (wasNew) "Question added." else "Question updated."
@@ -450,6 +561,8 @@ fun QuestionsScreen(
             },
             onRequestDelete = { target ->
                 editor = null
+                viewModel.clearImageError()
+                viewModel.setEditorImages(emptyList(), emptyList())
                 deleteTarget = target
             },
             viewModel = viewModel
@@ -472,15 +585,20 @@ fun QuestionsScreen(
             },
             title = { Text("Delete this question?") },
             text = {
+                // The editor draft may contain unsaved text; confirm against
+                // the question as it is actually stored in the paper.
+                val storedText = currentDeleteTarget.questionId?.let { id ->
+                    paper?.findQuestion(id)?.questionText
+                }.orEmpty()
                 Text(
                     buildString {
                         append("This question will be removed from \"")
                         append(currentDeleteTarget.categoryName)
                         append("\". This cannot be undone.")
-                        if (currentDeleteTarget.questionText.isNotBlank()) {
+                        if (storedText.isNotBlank()) {
                             append("\n\n")
-                            append(currentDeleteTarget.questionText.take(180))
-                            if (currentDeleteTarget.questionText.length > 180) append("...")
+                            append(storedText.take(180))
+                            if (storedText.length > 180) append("...")
                         }
                     }
                 )
@@ -633,13 +751,15 @@ fun QuestionsScreen(
             onMove = { targetCategoryId ->
                 val ids = currentMoveQuestions
                 moveQuestionsTarget = null
-                selectionMode = false
-                selectedQuestionIds = emptySet()
                 scope.launch {
                     val error = if (ids.size == 1) {
                         viewModel.moveQuestionToCategory(ids.first(), targetCategoryId)
                     } else {
                         viewModel.moveQuestionsToCategory(ids, targetCategoryId)
+                    }
+                    if (error == null) {
+                        selectionMode = false
+                        selectedQuestionIds = emptySet()
                     }
                     snackbarHostState.showSnackbar(
                         error ?: if (ids.size == 1) {
@@ -744,8 +864,10 @@ fun QuestionsScreen(
                             val error = viewModel.deleteQuestions(ids)
                             deleting = false
                             confirmBulkDelete = false
-                            selectionMode = false
-                            selectedQuestionIds = emptySet()
+                            if (error == null) {
+                                selectionMode = false
+                                selectedQuestionIds = emptySet()
+                            }
                             snackbarHostState.showSnackbar(
                                 error ?: if (ids.size == 1) {
                                     "Question deleted."
@@ -1340,6 +1462,7 @@ private fun CategoryMenu(
 
 @Composable
 private fun QuestionsContent(
+    viewModel: MainViewModel,
     paper: PaperDetail,
     selectionMode: Boolean,
     selectedQuestionIds: Set<String>,
@@ -1348,8 +1471,6 @@ private fun QuestionsContent(
     onMoveCategory: (CategoryDetail) -> Unit,
     onReparentCategory: (CategoryDetail) -> Unit,
     onMergeCategory: (CategoryDetail) -> Unit,
-    onReorderQuestion: (QuestionDetail, Int) -> Unit,
-    onReorderCategory: (CategoryDetail, Int) -> Unit,
     onEditQuestion: (CategoryNode, QuestionDetail) -> Unit,
     onAddQuestion: (CategoryNode) -> Unit,
     onAddSubcategory: (CategoryNode) -> Unit,
@@ -1363,7 +1484,7 @@ private fun QuestionsContent(
 ) {
     val categoryNodes = paper.flattenCategories()
     val listState = rememberLazyListState()
-    var lastScrolledFocus by remember { mutableStateOf<String?>(null) }
+    var lastScrolledFocus by remember { mutableStateOf<Pair<String, Int>?>(null) }
     val targetItemIndex = run {
         var index = 1
         if (categoryNodes.isEmpty()) index++
@@ -1388,11 +1509,12 @@ private fun QuestionsContent(
 
     LaunchedEffect(focusedCategoryId, focusedQuestionId, targetItemIndex) {
         val focusKey = focusedQuestionId ?: focusedCategoryId ?: return@LaunchedEffect
-        if (targetItemIndex == null || lastScrolledFocus == focusKey) {
-            return@LaunchedEffect
-        }
-        lastScrolledFocus = focusKey
-        listState.scrollToItem(targetItemIndex)
+        val index = targetItemIndex ?: return@LaunchedEffect
+        // A reorder can move the focused item to a different index; the guard
+        // must include it or the re-scroll is skipped.
+        if (lastScrolledFocus == focusKey to index) return@LaunchedEffect
+        lastScrolledFocus = focusKey to index
+        listState.scrollToItem(index)
     }
 
     LazyColumn(
@@ -1455,6 +1577,9 @@ private fun QuestionsContent(
             val category = node.category
             val expanded = category.id in expandedCategoryIds
             item(key = "header-${category.id}") {
+                val reorderCategorySteps = rememberSequentialReorder { delta ->
+                    viewModel.reorderCategory(category.id, delta)
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1501,7 +1626,7 @@ private fun QuestionsContent(
                     }
                     ReorderHandle(
                         contentDescription = "Drag ${category.name} to reorder",
-                        onMove = { delta -> onReorderCategory(category, delta) }
+                        onMove = { delta -> reorderCategorySteps(delta) }
                     )
                     TextButton(onClick = { onAddQuestion(node) }) {
                         Icon(
@@ -1519,8 +1644,8 @@ private fun QuestionsContent(
                         onMove = { onMoveCategory(category) },
                         onReparent = { onReparentCategory(category) },
                         onMerge = { onMergeCategory(category) },
-                        onMoveUp = { onReorderCategory(category, -1) },
-                        onMoveDown = { onReorderCategory(category, 1) },
+                        onMoveUp = { reorderCategorySteps(-1) },
+                        onMoveDown = { reorderCategorySteps(1) },
                         onDelete = { onDeleteCategory(category) }
                     )
                 }
@@ -1548,6 +1673,9 @@ private fun QuestionsContent(
                     items = category.questions,
                     key = { _, question -> question.id }
                 ) { index, question ->
+                    val reorderQuestionSteps = rememberSequentialReorder { delta ->
+                        viewModel.reorderQuestion(question.id, delta)
+                    }
                     QuestionCard(
                         number = index + 1,
                         question = question,
@@ -1556,7 +1684,7 @@ private fun QuestionsContent(
                         onToggleSelected = { onToggleQuestionSelected(question.id) },
                         onEdit = { onEditQuestion(node, question) },
                         onMove = { onMoveQuestion(question) },
-                        onReorder = { delta -> onReorderQuestion(question, delta) }
+                        onReorder = { delta -> reorderQuestionSteps(delta) }
                     )
                 }
             }
@@ -1851,12 +1979,10 @@ private fun QuestionEditorDialog(
         mutableStateOf(state.answerText)
     }
     var questionTouched by rememberSaveable(state.questionId) { mutableStateOf(false) }
-    var questionImages by remember(state.questionId) {
-        mutableStateOf(state.questionImages)
-    }
-    var answerImages by remember(state.questionId) {
-        mutableStateOf(state.answerImages)
-    }
+    // Attachments are kept in the ViewModel so they survive rotation without
+    // putting large image byte arrays into saved state.
+    val questionImages = viewModel.editorQuestionImages
+    val answerImages = viewModel.editorAnswerImages
     var importingQuestionImages by remember { mutableStateOf(false) }
     var importingAnswerImages by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
@@ -1872,9 +1998,14 @@ private fun QuestionEditorDialog(
             saveError = null
             scope.launch {
                 val prepared = uris.mapNotNull { uri -> viewModel.prepareImage(uri) }
-                questionImages = questionImages + prepared
-                if (prepared.size < uris.size) {
-                    saveError = "Some selected images could not be added."
+                val reason = viewModel.consumeImageError()
+                viewModel.setEditorImages(questionImages + prepared, answerImages)
+                // The AlertDialog has its own window, so show the specific
+                // reason inline here with the generic message as a fallback.
+                saveError = reason ?: if (prepared.size < uris.size) {
+                    "Some selected images could not be added."
+                } else {
+                    null
                 }
                 importingQuestionImages = false
             }
@@ -1888,9 +2019,12 @@ private fun QuestionEditorDialog(
             saveError = null
             scope.launch {
                 val prepared = uris.mapNotNull { uri -> viewModel.prepareImage(uri) }
-                answerImages = answerImages + prepared
-                if (prepared.size < uris.size) {
-                    saveError = "Some selected images could not be added."
+                val reason = viewModel.consumeImageError()
+                viewModel.setEditorImages(questionImages, answerImages + prepared)
+                saveError = reason ?: if (prepared.size < uris.size) {
+                    "Some selected images could not be added."
+                } else {
+                    null
                 }
                 importingAnswerImages = false
             }
@@ -1941,7 +2075,10 @@ private fun QuestionEditorDialog(
                     enabled = !saving,
                     onAdd = { questionImageLauncher.launch("image/*") },
                     onRemove = { image ->
-                        questionImages = questionImages.filterNot { it.id == image.id }
+                        viewModel.setEditorImages(
+                            questionImages.filterNot { it.id == image.id },
+                            answerImages
+                        )
                     }
                 )
                 Spacer(Modifier.height(12.dp))
@@ -1971,7 +2108,10 @@ private fun QuestionEditorDialog(
                     enabled = !saving,
                     onAdd = { answerImageLauncher.launch("image/*") },
                     onRemove = { image ->
-                        answerImages = answerImages.filterNot { it.id == image.id }
+                        viewModel.setEditorImages(
+                            questionImages,
+                            answerImages.filterNot { it.id == image.id }
+                        )
                     }
                 )
                 saveError?.let { message ->

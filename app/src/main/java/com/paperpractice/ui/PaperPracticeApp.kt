@@ -52,7 +52,10 @@ fun PaperPracticeApp(viewModel: MainViewModel) {
         composable(Routes.SEARCH) {
             SearchScreen(
                 viewModel = viewModel,
-                onBack = { navController.popBackStack() },
+                onBack = {
+                    viewModel.clearSearch()
+                    navController.popBackStack()
+                },
                 onOpenPaper = { paperId ->
                     navController.navigate(Routes.configure(paperId)) {
                         launchSingleTop = true

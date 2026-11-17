@@ -89,6 +89,90 @@ class ImageMetadataTest {
         assertEquals(480, image.height)
     }
 
+    @Test
+    fun `jpeg exif orientation six swaps inferred dimensions`() {
+        // TIFF/IFD0 little-endian block with a single Orientation (0x0112)
+        // tag whose value is 6 (rotate 90 degrees -> transpose width/height).
+        val tiff = byteArrayOf(
+            'I'.code.toByte(), 'I'.code.toByte(),
+            0x2A.toByte(), 0x00,
+            0x08, 0x00, 0x00, 0x00, // IFD offset
+            0x01, 0x00,             // one directory entry
+            0x12, 0x01,             // tag 0x0112 (Orientation)
+            0x03, 0x00,             // type SHORT
+            0x01, 0x00, 0x00, 0x00, // count = 1
+            0x06, 0x00, 0x00, 0x00, // value = 6
+            0x00, 0x00, 0x00, 0x00  // no next IFD
+        )
+        val exif = "Exif\u0000\u0000".toByteArray()
+        val appLength = 2 + exif.size + tiff.size
+        val jpeg = byteArrayOf(
+            0xFF.toByte(), 0xD8.toByte(),
+            0xFF.toByte(), 0xE1.toByte(),
+            (appLength ushr 8).toByte(), appLength.toByte()
+        ) + exif + tiff + byteArrayOf(
+            0xFF.toByte(), 0xC0.toByte(),
+            0x00, 0x11, 0x08,
+            0x00, 0x64,          // stored height 100
+            0x00, 0xC8.toByte(), // stored width 200
+            0x03,
+            0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00
+        )
+
+        assertEquals(100 to 200, ImageMetadata.dimensions(jpeg))
+    }
+
+    @Test
+    fun `short or truncated headers return null without throwing`() {
+        assertNull(ImageMetadata.dimensions(byteArrayOf()))
+        assertNull(ImageMetadata.dimensions(byteArrayOf(0xFF.toByte(), 0xD8.toByte())))
+
+        // A JPEG whose APP1 length runs past the available bytes.
+        val truncatedJpeg = byteArrayOf(
+            0xFF.toByte(), 0xD8.toByte(),
+            0xFF.toByte(), 0xE0.toByte(),
+            0x00, 0x10, 0x00, 0x00,
+            0xFF.toByte(), 0xC0.toByte(), 0x00
+        )
+        assertNull(ImageMetadata.dimensions(truncatedJpeg))
+
+        // A 25-byte VP8 WebP is too short to hold the full VP8 key frame
+        // header; it must return null rather than throw.
+        val shortVp8 = byteArrayOf(
+            'R'.code.toByte(), 'I'.code.toByte(), 'F'.code.toByte(), 'F'.code.toByte(),
+            0x00, 0x00, 0x00, 0x00,
+            'W'.code.toByte(), 'E'.code.toByte(), 'B'.code.toByte(), 'P'.code.toByte(),
+            'V'.code.toByte(), 'P'.code.toByte(), '8'.code.toByte(), ' '.code.toByte(),
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x9D.toByte(), 0x01
+        )
+        assertNull(ImageMetadata.dimensions(shortVp8))
+    }
+
+    @Test
+    fun `accepts valid gif signatures and rejects unknown ones`() {
+        val dimensions = byteArrayOf(0x40, 0x01, 0xF0.toByte(), 0x00)
+        assertEquals(320 to 240, ImageMetadata.dimensions("GIF89a".toByteArray() + dimensions))
+        assertEquals(320 to 240, ImageMetadata.dimensions("GIF87a".toByteArray() + dimensions))
+        assertNull(ImageMetadata.dimensions("GIF8xx".toByteArray() + dimensions))
+    }
+
+    @Test
+    fun `accepts minimal VP8L webp header`() {
+        // 25 bytes are enough for the VP8L lossless header. bits encodes
+        // width - 1 = 110 and height - 1 = 221 (little endian).
+        val webp = byteArrayOf(
+            'R'.code.toByte(), 'I'.code.toByte(), 'F'.code.toByte(), 'F'.code.toByte(),
+            0x00, 0x00, 0x00, 0x00,
+            'W'.code.toByte(), 'E'.code.toByte(), 'B'.code.toByte(), 'P'.code.toByte(),
+            'V'.code.toByte(), 'P'.code.toByte(), '8'.code.toByte(), 'L'.code.toByte(),
+            0x05, 0x00, 0x00, 0x00, // chunk size
+            0x2F.toByte(),          // VP8L signature
+            0x6E, 0x40, 0x37, 0x00  // packed width/height
+        )
+        assertEquals(111 to 222, ImageMetadata.dimensions(webp))
+    }
+
     private fun pngHeader(width: Int, height: Int): ByteArray {
         val bytes = ByteArray(24)
         byteArrayOf(
