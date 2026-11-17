@@ -604,7 +604,7 @@ to the device first.
 
 - JDK 17
 - Android SDK platform 37 and build-tools 37.0.0
-- Gradle 9.6.1 (the wrapper handles this)
+- Gradle 9.9.1 (the wrapper handles this)
 - An Android SDK location configured through `ANDROID_HOME`,
   `ANDROID_SDK_ROOT`, or `local.properties`
 
@@ -634,7 +634,7 @@ sh gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug \
   --no-daemon --console=plain
 ```
 
-The suite contains 74 JVM tests covering strict JSON validation, recursive
+The suite contains 126 JVM tests covering strict JSON validation, recursive
 categories, sample-paper consistency, randomised selection, answer
 associations, rich-text formatting, backups, image metadata and privacy, and
 every exporter.
@@ -677,7 +677,7 @@ app/src/test/         Parser, generator, rich-text, backup, and exporter tests
 app/schemas/          Exported Room schemas used by migrations
 ```
 
-Room database version 4 includes real 2→3 and 3→4 migrations; destructive
+Room database version 5 includes real 2→3, 3→4 and 4→5 migrations; destructive
 migration fallback is not used.
 
 ## License

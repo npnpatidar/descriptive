@@ -237,7 +237,10 @@ private fun SearchResultCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .clickable(
+                onClick = onClick,
+                onClickLabel = "Open search result"
+            ),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         )

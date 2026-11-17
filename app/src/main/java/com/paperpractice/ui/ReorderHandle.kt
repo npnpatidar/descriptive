@@ -2,11 +2,13 @@ package com.paperpractice.ui
 
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DragHandle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -36,7 +38,38 @@ fun ReorderHandle(
     var accumulated by remember { mutableFloatStateOf(0f) }
 
     Box(
-        modifier = modifier.size(40.dp),
+        modifier = modifier
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .minimumInteractiveComponentSize()
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                detectVerticalDragGestures(
+                    onDragStart = {
+                        accumulated = 0f
+                    },
+                    onDragEnd = {
+                        accumulated = 0f
+                    },
+                    onDragCancel = {
+                        accumulated = 0f
+                    },
+                    onVerticalDrag = { change, dragAmount ->
+                        change.consume()
+                        accumulated += dragAmount
+                        // Emit each crossed threshold immediately so the row
+                        // visibly moves under the finger. The receiver queues
+                        // these steps and applies them sequentially.
+                        while (accumulated >= threshold) {
+                            accumulated -= threshold
+                            latestOnMove(1)
+                        }
+                        while (accumulated <= -threshold) {
+                            accumulated += threshold
+                            latestOnMove(-1)
+                        }
+                    }
+                )
+            },
         contentAlignment = Alignment.Center
     ) {
         Icon(
@@ -47,37 +80,7 @@ fun ReorderHandle(
             } else {
                 MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
             },
-            modifier = Modifier
-                .size(24.dp)
-                .pointerInput(enabled) {
-                    if (!enabled) return@pointerInput
-                    detectVerticalDragGestures(
-                        onDragStart = {
-                            accumulated = 0f
-                        },
-                        onDragEnd = {
-                            accumulated = 0f
-                        },
-                        onDragCancel = {
-                            accumulated = 0f
-                        },
-                        onVerticalDrag = { change, dragAmount ->
-                            change.consume()
-                            accumulated += dragAmount
-                            // Emit each crossed threshold immediately so the row
-                            // visibly moves under the finger. The receiver queues
-                            // these steps and applies them sequentially.
-                            while (accumulated >= threshold) {
-                                accumulated -= threshold
-                                latestOnMove(1)
-                            }
-                            while (accumulated <= -threshold) {
-                                accumulated += threshold
-                                latestOnMove(-1)
-                            }
-                        }
-                    )
-                }
+            modifier = Modifier.size(24.dp)
         )
     }
 }

@@ -3,7 +3,6 @@ package com.paperpractice.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -77,7 +77,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -1051,13 +1054,18 @@ private fun MoveQuestionsDialog(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { targetId = node.category.id }
+                                .heightIn(min = 48.dp)
+                                .selectable(
+                                    selected = targetId == node.category.id,
+                                    role = Role.RadioButton,
+                                    onClick = { targetId = node.category.id }
+                                )
                                 .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
                                 selected = targetId == node.category.id,
-                                onClick = { targetId = node.category.id }
+                                onClick = null
                             )
                             Text(
                                 node.displayName,
@@ -1114,13 +1122,18 @@ private fun MoveCategoryDialog(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { targetId = paper.id }
+                                    .heightIn(min = 48.dp)
+                                    .selectable(
+                                        selected = targetId == paper.id,
+                                        role = Role.RadioButton,
+                                        onClick = { targetId = paper.id }
+                                    )
                                     .padding(vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 RadioButton(
                                     selected = targetId == paper.id,
-                                    onClick = { targetId = paper.id }
+                                    onClick = null
                                 )
                                 Text(
                                     paper.name,
@@ -1170,19 +1183,21 @@ private fun ReparentCategoryDialog(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable {
-                            topLevelSelected = true
-                            targetParentId = null
-                        }
+                        .heightIn(min = 48.dp)
+                        .selectable(
+                            selected = topLevelSelected,
+                            role = Role.RadioButton,
+                            onClick = {
+                                topLevelSelected = true
+                                targetParentId = null
+                            }
+                        )
                         .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     RadioButton(
                         selected = topLevelSelected,
-                        onClick = {
-                            topLevelSelected = true
-                            targetParentId = null
-                        }
+                        onClick = null
                     )
                     Text("Top level", style = MaterialTheme.typography.bodyMedium)
                 }
@@ -1192,20 +1207,23 @@ private fun ReparentCategoryDialog(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
-                                    topLevelSelected = false
-                                    targetParentId = node.category.id
-                                }
+                                .heightIn(min = 48.dp)
+                                .selectable(
+                                    selected = !topLevelSelected &&
+                                        targetParentId == node.category.id,
+                                    role = Role.RadioButton,
+                                    onClick = {
+                                        topLevelSelected = false
+                                        targetParentId = node.category.id
+                                    }
+                                )
                                 .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
                                 selected = !topLevelSelected &&
                                     targetParentId == node.category.id,
-                                onClick = {
-                                    topLevelSelected = false
-                                    targetParentId = node.category.id
-                                }
+                                onClick = null
                             )
                             Text(
                                 node.displayName,
@@ -1255,13 +1273,18 @@ private fun MergeCategoryDialog(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { target = node.category }
+                                .heightIn(min = 48.dp)
+                                .selectable(
+                                    selected = target?.id == node.category.id,
+                                    role = Role.RadioButton,
+                                    onClick = { target = node.category }
+                                )
                                 .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
                                 selected = target?.id == node.category.id,
-                                onClick = { target = node.category }
+                                onClick = null
                             )
                             Text(
                                 node.displayName,
@@ -1298,7 +1321,7 @@ private fun NameEditorDialog(
 ) {
     var name by rememberSaveable(initialValue) { mutableStateOf(initialValue) }
     var saving by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var validationError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     AlertDialog(
@@ -1309,14 +1332,16 @@ private fun NameEditorDialog(
                 value = name,
                 onValueChange = {
                     name = it
-                    error = null
+                    validationError = null
                 },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { validationError?.let { error(it) } },
                 label = { Text(label) },
                 singleLine = true,
                 enabled = !saving,
-                isError = error != null,
-                supportingText = error?.let { message -> { Text(message) } }
+                isError = validationError != null,
+                supportingText = validationError?.let { message -> { Text(message) } }
             )
         },
         confirmButton = {
@@ -1324,13 +1349,13 @@ private fun NameEditorDialog(
                 enabled = name.isNotBlank() && !saving,
                 onClick = {
                     saving = true
-                    error = null
+                    validationError = null
                     scope.launch {
                         val saveError = onSave(name)
                         if (saveError == null) {
                             onSaved()
                         } else {
-                            error = saveError
+                            validationError = saveError
                             saving = false
                         }
                     }
@@ -1605,7 +1630,8 @@ private fun QuestionsContent(
                             category.name,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.semantics { heading() }
                         )
                         val ownQuestions = category.questions.size
                         val totalQuestions = category.totalQuestionCount
@@ -1756,8 +1782,7 @@ private fun QuestionCard(
                     )
                     Box {
                         IconButton(
-                            onClick = { menuOpen = true },
-                            modifier = Modifier.size(36.dp)
+                            onClick = { menuOpen = true }
                         ) {
                             Icon(
                                 Icons.Outlined.MoreVert,
@@ -1951,9 +1976,7 @@ private fun EditorImageThumb(
         IconButton(
             onClick = onRemove,
             enabled = enabled,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .size(30.dp)
+            modifier = Modifier.align(Alignment.TopEnd)
         ) {
             Icon(
                 Icons.Outlined.Close,
@@ -2055,7 +2078,13 @@ private fun QuestionEditorDialog(
                         questionTouched = true
                         saveError = null
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics {
+                            if (questionTouched && questionBlank) {
+                                error("Question text is required.")
+                            }
+                        },
                     label = { Text("Question") },
                     minLines = 3,
                     maxLines = 7,

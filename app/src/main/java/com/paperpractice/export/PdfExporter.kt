@@ -24,6 +24,9 @@ import com.paperpractice.domain.RichInline
 import com.paperpractice.domain.RichText
 import com.paperpractice.render.RichTextSpans
 import java.io.OutputStream
+import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlin.math.max
 import kotlin.math.min
 
@@ -35,22 +38,55 @@ import kotlin.math.min
  */
 object PdfExporter {
 
+    /** Non-suspending entry point kept for plain callers. */
     fun write(
         content: PaperContent,
         includeAnswers: Boolean,
         answersAtEnd: Boolean,
         output: OutputStream
     ) {
+        writeImpl(content, includeAnswers, answersAtEnd, output, cancellationContext = null)
+    }
+
+    /**
+     * Cancellation-aware entry point used by the UI. [currentCoroutineContext]
+     * is resolved here (a suspend call) and passed into the renderer so its long
+     * loops can call [CoroutineContext.ensureActive] promptly.
+     */
+    suspend fun writeCancellable(
+        content: PaperContent,
+        includeAnswers: Boolean,
+        answersAtEnd: Boolean,
+        output: OutputStream
+    ) {
+        writeImpl(content, includeAnswers, answersAtEnd, output, currentCoroutineContext())
+    }
+
+    private fun writeImpl(
+        content: PaperContent,
+        includeAnswers: Boolean,
+        answersAtEnd: Boolean,
+        output: OutputStream,
+        cancellationContext: CoroutineContext?
+    ) {
+        val checkActive: () -> Unit = { cancellationContext?.ensureActive() }
         val document = PdfDocument()
         // Bitmaps decoded while drawing pages are kept alive until the PDF has
         // been fully written: SkPDF may retain a reference to their pixels on
         // some API levels, so recycling them at draw time is unsafe.
         val decodedBitmaps = mutableListOf<Bitmap>()
+        // Nullable alias used only by the cleanup in finally, so a still-open
+        // page can be finished before document.close().
+        var cleanupWriter: PageWriter? = null
         try {
-            val writer = PageWriter(document, content.paperName, decodedBitmaps)
-            writer.drawTitle(content)
+            // Non-null val for every drawing call. A local function
+            // (appendCategory) captures it, and a captured mutable variable is
+            // not reliably smart-cast by Kotlin; a val needs no smart cast.
+            val pageWriter = PageWriter(document, content.paperName, decodedBitmaps, checkActive)
+            cleanupWriter = pageWriter
+            pageWriter.drawTitle(content)
             if (content.categories.isEmpty()) {
-                writer.drawBody("This paper contains no categories.", spacingAfter = 12f)
+                pageWriter.drawBody("This paper contains no categories.", spacingAfter = 12f)
             }
             var number = 1
             val answers = mutableListOf<AnswerEntry>()
@@ -59,16 +95,18 @@ object PdfExporter {
                 category: CategoryContent,
                 parentPath: List<String>
             ) {
+                checkActive()
                 val path = parentPath + category.categoryName
                 if (category.questions.isNotEmpty()) {
-                    writer.drawCategory(categoryExportName(parentPath, category.categoryName))
+                    pageWriter.drawCategory(categoryExportName(parentPath, category.categoryName))
                     category.questions.forEach { question ->
-                        writer.drawQuestion(
+                        checkActive()
+                        pageWriter.drawQuestion(
                             number,
                             RichText.parse(question.questionText).blocks,
                             includeAnswers && !answersAtEnd
                         )
-                        writer.drawImages(question.questionImages)
+                        pageWriter.drawImages(question.questionImages)
                         if (includeAnswers) {
                             val answer = RichText.parse(
                                 question.answerText.ifBlank { "(No answer provided)" }
@@ -80,7 +118,7 @@ object PdfExporter {
                                     images = question.answerImages
                                 )
                             } else {
-                                writer.drawAnswer(answer, question.answerImages)
+                                pageWriter.drawAnswer(answer, question.answerImages)
                             }
                         }
                         number++
@@ -96,18 +134,25 @@ object PdfExporter {
             }
 
             if (includeAnswers && answersAtEnd && answers.isNotEmpty()) {
-                writer.startAnswerSection()
+                pageWriter.startAnswerSection()
                 answers.forEach { answer ->
-                    writer.drawAnswerEntry(
+                    checkActive()
+                    pageWriter.drawAnswerEntry(
                         answer.number,
                         answer.blocks,
                         answer.images
                     )
                 }
             }
-            writer.finish()
+            pageWriter.finish()
             document.writeTo(output)
         } finally {
+            // checkActive() can throw from any of the drawing loops, leaving a
+            // page started but never finished. PdfDocument.close() must not be
+            // called while a page is open, so finish it here first. The helper
+            // is null-safe: finish() already finished the page on the normal
+            // path, so this is a no-op there (no double finish).
+            cleanupWriter?.finishCurrentPageIfNeeded()
             document.close()
             // Safe now that finishPage/writeTo (and close) are done. Runs on
             // failure paths too, so a failed export never leaks native pixels.
@@ -126,7 +171,8 @@ object PdfExporter {
     private class PageWriter(
         private val document: PdfDocument,
         private val runningTitle: String,
-        private val decodedBitmaps: MutableList<Bitmap>
+        private val decodedBitmaps: MutableList<Bitmap>,
+        private val checkActive: () -> Unit
     ) {
         private val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(30, 36, 51)
@@ -277,8 +323,61 @@ object PdfExporter {
 
         fun drawImages(images: List<ImageContent>) {
             images.forEach { image ->
+                checkActive()
+                // Read only the dimensions first so the sample size can be
+                // chosen for the rectangle the image will actually occupy
+                // (content width is ~499pt) instead of decoding every stored
+                // byte at full resolution.
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                try {
+                    BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size, bounds)
+                } catch (_: Exception) {
+                    return@forEach
+                }
+                val sourceWidth = bounds.outWidth
+                val sourceHeight = bounds.outHeight
+                if (sourceWidth <= 0 || sourceHeight <= 0) return@forEach
+
+                val maxWidth = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT
+                val maxHeight = min(300f, CONTENT_BOTTOM - MARGIN_TOP)
+                // Never upscale: the drawn rectangle is bounded by the source
+                // dimensions, exactly as before.
+                val scale = min(
+                    1f,
+                    min(
+                        maxWidth / sourceWidth.toFloat(),
+                        maxHeight / sourceHeight.toFloat()
+                    )
+                )
+                val drawWidth = sourceWidth * scale
+                val drawHeight = sourceHeight * scale
+
+                // Keep roughly two decoded pixels per page point (about 144
+                // dpi at 72 pt/in) so print stays legible, plus a hard pixel
+                // budget as a safety net for pathological sources.
+                val targetWidth = drawWidth.times(IMAGE_PIXELS_PER_POINT).toInt().coerceAtLeast(1)
+                val targetHeight = drawHeight.times(IMAGE_PIXELS_PER_POINT).toInt().coerceAtLeast(1)
+                var sampleSize = 1
+                while (
+                    sourceWidth / (sampleSize * 2) >= targetWidth &&
+                    sourceHeight / (sampleSize * 2) >= targetHeight
+                ) {
+                    sampleSize *= 2
+                }
+                while (
+                    (sourceWidth / sampleSize).toLong() * (sourceHeight / sampleSize) >
+                        IMAGE_PIXEL_BUDGET
+                ) {
+                    sampleSize *= 2
+                }
+
                 val bitmap = try {
-                    BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
+                    BitmapFactory.decodeByteArray(
+                        image.bytes,
+                        0,
+                        image.bytes.size,
+                        BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                    )
                 } catch (_: Exception) {
                     null
                 } ?: return@forEach
@@ -287,17 +386,6 @@ object PdfExporter {
                 // method recycles every collected bitmap in its finally block.
                 decodedBitmaps += bitmap
                 if (bitmap.width <= 0 || bitmap.height <= 0) return@forEach
-                val maxWidth = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT
-                val maxHeight = min(300f, CONTENT_BOTTOM - MARGIN_TOP)
-                val scale = min(
-                    1f,
-                    min(
-                        maxWidth / bitmap.width.toFloat(),
-                        maxHeight / bitmap.height.toFloat()
-                    )
-                )
-                val drawWidth = bitmap.width * scale
-                val drawHeight = bitmap.height * scale
 
                 if (y + drawHeight + 10f > CONTENT_BOTTOM) newPage()
                 ensurePage()
@@ -339,6 +427,7 @@ object PdfExporter {
 
             var pendingPrefix = prefix
             blocks.forEachIndexed { index, block ->
+                checkActive()
                 when (block) {
                     is RichBlock.Paragraph -> {
                         drawRichParagraph(
@@ -449,6 +538,7 @@ object PdfExporter {
 
             var offset = 0
             while (offset < layout.height) {
+                checkActive()
                 ensurePage()
                 val available = (CONTENT_BOTTOM - y).toInt()
                 if (available <= 2) {
@@ -692,6 +782,7 @@ object PdfExporter {
                 var offset = 0f
                 var needHeader = false
                 while (offset < rowHeight) {
+                    checkActive()
                     if (needHeader) {
                         newPage()
                         if (repeatHeader) {
@@ -781,6 +872,23 @@ object PdfExporter {
         fun finish() {
             if (page == null) beginPage()
             finishPage()
+        }
+
+        /**
+         * Cleanup for failure/cancellation paths only. If a page is still open,
+         * finish it via the normal [finishPage] logic so [document].close() is
+         * never called with an unfinished page. Null-safe by design: [finish]
+         * sets `page` to null after finishing it, so a successful export does
+         * not finish the same page twice. Any cleanup failure is swallowed so
+         * it cannot mask the exception that triggered this path.
+         */
+        fun finishCurrentPageIfNeeded() {
+            if (page == null) return
+            try {
+                finishPage()
+            } catch (_: Throwable) {
+                // Best-effort cleanup only; never replace the original error.
+            }
         }
 
         private fun ensurePage(): Canvas {
@@ -911,5 +1019,9 @@ object PdfExporter {
     private const val MARGIN_RIGHT = 48f
     private const val MARGIN_TOP = 46f
     private const val CONTENT_BOTTOM = PAGE_HEIGHT - 48f
+    // Downsampling targets: ~2 px per point keeps embedded images legible in
+    // print; the budget caps any single decoded bitmap at ~4 megapixels.
+    private const val IMAGE_PIXELS_PER_POINT = 2f
+    private const val IMAGE_PIXEL_BUDGET = 4_000_000
     private val HIGHLIGHT_COLOR = Color.rgb(255, 240, 168)
 }

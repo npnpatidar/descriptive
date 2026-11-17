@@ -30,7 +30,13 @@ fun AttachedImages(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         images.forEachIndexed { index, image ->
-            val bitmap = remember(image.id, image.bytes) {
+            // ByteArray has referential equality: keying on `image.bytes`
+            // re-decodes on every recomposition that rebuilds the content
+            // model (for example after a refresh reads the BLOB again). The
+            // image id is stable, but a replaced image may reuse its id with
+            // new bytes, so include a cheap content token as well.
+            val contentToken = imageContentToken(image.bytes)
+            val bitmap = remember(image.id, contentToken) {
                 decodeImageForDisplay(image.bytes)
                     ?.asImageBitmap()
             }
@@ -47,4 +53,20 @@ fun AttachedImages(
             }
         }
     }
+}
+
+/**
+ * A cheap fingerprint of an encoded image: its size plus a small rolling hash
+ * over the first, middle and last bytes. Replacing an image under the same id
+ * changes at least one of these in practice, so the thumbnail is re-decoded
+ * only when the bytes actually change rather than on every reconnect.
+ */
+private fun imageContentToken(bytes: ByteArray): String {
+    if (bytes.isEmpty()) return "0:0"
+    var hash = 17
+    hash = 31 * hash + bytes.size
+    hash = 31 * hash + bytes[0].toInt()
+    hash = 31 * hash + bytes[bytes.size / 2].toInt()
+    hash = 31 * hash + bytes[bytes.lastIndex].toInt()
+    return "${bytes.size}:$hash"
 }

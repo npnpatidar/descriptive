@@ -3,13 +3,16 @@ package com.paperpractice.export
 import com.paperpractice.domain.PaperContent
 import com.paperpractice.domain.PaperFormatException
 import com.paperpractice.domain.PaperJsonParser
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.encodeToStream
 import kotlinx.serialization.json.put
+import java.io.OutputStream
 
 /**
  * A single-file backup that preserves every paper and its complete category
@@ -22,21 +25,36 @@ object PaperBackup {
 
     private val prettyJson = Json { prettyPrint = true }
 
+    /** Kept for tests and callers that need the in-memory text. */
     fun build(papers: List<PaperContent>): String {
-        val root = buildJsonObject {
-            put("format", FORMAT)
-            put("version", VERSION)
-            put("exportedAt", System.currentTimeMillis())
-            put(
-                "papers",
-                buildJsonArray {
-                    papers.forEach { paper ->
-                        add(JsonExporter.buildObject(paper, includeAnswers = true))
-                    }
+        return prettyJson.encodeToString(JsonElement.serializer(), buildRoot(papers)) + "\n"
+    }
+
+    /**
+     * Streams the same bytes as [build] straight to [output]. Encoding directly
+     * to the stream avoids materialising a second, full-size String and byte
+     * array for large backups. The caller owns the stream and must close it.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    fun write(output: OutputStream, papers: List<PaperContent>) {
+        prettyJson.encodeToStream(JsonElement.serializer(), buildRoot(papers), output)
+        // encodeToString never emits a trailing newline; build() appends one.
+        output.write('\n'.code)
+        output.flush()
+    }
+
+    private fun buildRoot(papers: List<PaperContent>): JsonObject = buildJsonObject {
+        put("format", FORMAT)
+        put("version", VERSION)
+        put("exportedAt", System.currentTimeMillis())
+        put(
+            "papers",
+            buildJsonArray {
+                papers.forEach { paper ->
+                    add(JsonExporter.buildObject(paper, includeAnswers = true))
                 }
-            )
-        }
-        return prettyJson.encodeToString(JsonElement.serializer(), root) + "\n"
+            }
+        )
     }
 
     fun parse(source: String): List<PaperContent> {
@@ -45,14 +63,21 @@ object PaperBackup {
             throw PaperFormatException("The selected backup is empty.")
         }
 
+        // JSON parsing is recursive: a pathologically nested document can throw
+        // a StackOverflowError, which is an Error rather than an Exception.
         val root = try {
             Json.parseToJsonElement(text)
-        } catch (e: Exception) {
-            throw PaperFormatException(
-                "The backup is not valid JSON. " +
-                    (e.message?.lineSequence()?.firstOrNull()?.trim()
-                        ?: "Check the file contents.")
-            )
+        } catch (e: Throwable) {
+            // Only convert expected parse failures; let OOM and other Errors
+            // propagate instead of masking them as a bad input file.
+            if (e !is StackOverflowError && e !is Exception) throw e
+            val detail = if (e is StackOverflowError) {
+                "The file is nested too deeply."
+            } else {
+                e.message?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()
+                    ?: "Check the file contents."
+            }
+            throw PaperFormatException("The backup is not valid JSON. $detail")
         }
 
         val rootObject = root as? JsonObject

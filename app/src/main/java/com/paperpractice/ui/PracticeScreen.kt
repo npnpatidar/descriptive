@@ -42,6 +42,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.paperpractice.domain.SessionQuestion
@@ -181,7 +185,9 @@ private fun PracticeContent(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .semantics { heading() }
                     )
                     Text(
                         text = if (questions.size == 1) "1 question" else {
@@ -291,7 +297,10 @@ private fun QuestionCard(question: SessionQuestion, showAnswer: Boolean) {
                     Spacer(Modifier.height(4.dp))
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.semantics {
+                            liveRegion = LiveRegionMode.Polite
+                        }
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
                             RichTextContent(

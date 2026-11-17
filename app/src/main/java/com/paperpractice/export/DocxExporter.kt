@@ -9,8 +9,12 @@ import com.paperpractice.domain.RichInline
 import com.paperpractice.domain.RichInlineStyle
 import com.paperpractice.domain.RichText
 import java.io.OutputStream
+import java.io.OutputStreamWriter
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlin.math.max
 import kotlin.math.min
 
@@ -22,13 +26,39 @@ import kotlin.math.min
  */
 object DocxExporter {
 
+    /** Non-suspending entry point kept for tests and plain callers. */
     fun write(
         content: PaperContent,
         includeAnswers: Boolean,
         answersAtEnd: Boolean,
         output: OutputStream
     ) {
-        val images = collectImages(content, includeAnswers)
+        writeTo(content, includeAnswers, answersAtEnd, output, cancellationContext = null)
+    }
+
+    /**
+     * Cancellation-aware entry point used by the UI. [currentCoroutineContext]
+     * is resolved here (a suspend call) and passed into the writer so the long
+     * rendering loops can call [CoroutineContext.ensureActive] promptly.
+     */
+    suspend fun writeCancellable(
+        content: PaperContent,
+        includeAnswers: Boolean,
+        answersAtEnd: Boolean,
+        output: OutputStream
+    ) {
+        writeTo(content, includeAnswers, answersAtEnd, output, currentCoroutineContext())
+    }
+
+    private fun writeTo(
+        content: PaperContent,
+        includeAnswers: Boolean,
+        answersAtEnd: Boolean,
+        output: OutputStream,
+        cancellationContext: CoroutineContext?
+    ) {
+        val checkActive: () -> Unit = { cancellationContext?.ensureActive() }
+        val images = collectImages(content, includeAnswers, checkActive)
         val zip = ZipOutputStream(output)
         zip.putNextEntry(ZipEntry("[Content_Types].xml"))
         zip.write(CONTENT_TYPES.toByteArray(Charsets.UTF_8))
@@ -43,13 +73,15 @@ object DocxExporter {
         zip.closeEntry()
 
         zip.putNextEntry(ZipEntry("word/document.xml"))
-        zip.write(
-            documentXml(content, includeAnswers, answersAtEnd, images)
-                .toByteArray(Charsets.UTF_8)
-        )
+        // Stream the document part straight into the zip entry instead of
+        // materialising the entire XML as a String and then a byte array.
+        val writer = OutputStreamWriter(zip, Charsets.UTF_8)
+        writeDocumentXml(writer, content, includeAnswers, answersAtEnd, images, checkActive)
+        writer.flush()
         zip.closeEntry()
 
         images.forEach { asset ->
+            checkActive()
             zip.putNextEntry(ZipEntry(asset.partName))
             zip.write(asset.image.bytes)
             zip.closeEntry()
@@ -61,13 +93,15 @@ object DocxExporter {
 
     private fun collectImages(
         content: PaperContent,
-        includeAnswers: Boolean
+        includeAnswers: Boolean,
+        checkActive: () -> Unit
     ): List<DocxImageAsset> {
         val assets = mutableListOf<DocxImageAsset>()
         val seen = mutableSetOf<String>()
 
         fun add(images: List<ImageContent>) {
             images.forEach { image ->
+                checkActive()
                 if (!seen.add(image.id)) return@forEach
                 val extension = when (image.mimeType.lowercase()) {
                     "image/png" -> "png"
@@ -87,6 +121,7 @@ object DocxExporter {
         }
 
         fun visit(category: CategoryContent) {
+            checkActive()
             category.questions.forEach { question ->
                 add(question.questionImages)
                 if (includeAnswers) add(question.answerImages)
@@ -113,12 +148,20 @@ object DocxExporter {
         append("</Relationships>")
     }
 
-    private fun documentXml(
+    /**
+     * Writes the document part straight to [out]. The surrounding XML shell is
+     * held as two constant pieces with a marker between them, so the body can
+     * be streamed rather than accumulated into a single large String. The
+     * resulting bytes are identical to the previous one-shot template.
+     */
+    private fun writeDocumentXml(
+        out: Appendable,
         content: PaperContent,
         includeAnswers: Boolean,
         answersAtEnd: Boolean,
-        images: List<DocxImageAsset>
-    ): String {
+        images: List<DocxImageAsset>,
+        checkActive: () -> Unit
+    ) {
         val imagesById = images.associateBy { it.image.id }
         val totalLabel = if (content.questionCount == 1) "1 question" else {
             "${content.questionCount} questions"
@@ -130,8 +173,8 @@ object DocxExporter {
             "$categoryCount categories"
         }
 
-        val body = StringBuilder()
-        body.append(
+        out.append(DOCUMENT_PREFIX)
+        out.append(
             paragraph(
                 runs = listOf(
                     Run(
@@ -144,7 +187,7 @@ object DocxExporter {
                 spacingAfter = 80
             )
         )
-        body.append(
+        out.append(
             paragraph(
                 runs = listOf(
                     Run(
@@ -166,9 +209,10 @@ object DocxExporter {
             parentPath: List<String>,
             headingDepth: Int
         ) {
+            checkActive()
             val path = parentPath + category.categoryName
             if (category.questions.isNotEmpty()) {
-                body.append(
+                out.append(
                     paragraph(
                         runs = listOf(
                             Run(
@@ -185,8 +229,9 @@ object DocxExporter {
                 )
 
                 category.questions.forEach { question ->
+                    checkActive()
                     appendRichBlocks(
-                        body = body,
+                        out = out,
                         blocks = RichText.parse(question.questionText).blocks,
                         prefix = listOf(
                             Run(
@@ -203,7 +248,7 @@ object DocxExporter {
 
                     question.questionImages.forEach { image ->
                         imagesById[image.id]?.let { asset ->
-                            body.append(imageParagraph(asset))
+                            out.append(imageParagraph(asset))
                         }
                     }
 
@@ -219,7 +264,7 @@ object DocxExporter {
                             )
                         } else {
                             appendRichBlocks(
-                                body = body,
+                                out = out,
                                 blocks = blocks,
                                 prefix = listOf(
                                     Run(
@@ -240,7 +285,7 @@ object DocxExporter {
                             )
                             question.answerImages.forEach { image ->
                                 imagesById[image.id]?.let { asset ->
-                                    body.append(imageParagraph(asset, indentLeft = 360))
+                                    out.append(imageParagraph(asset, indentLeft = 360))
                                 }
                             }
                         }
@@ -264,7 +309,7 @@ object DocxExporter {
         }
 
         if (includeAnswers && answersAtEnd && answers.isNotEmpty()) {
-            body.append(
+            out.append(
                 paragraph(
                     runs = listOf(
                         Run(
@@ -281,8 +326,9 @@ object DocxExporter {
                 )
             )
             answers.forEach { answer ->
+                checkActive()
                 appendRichBlocks(
-                    body = body,
+                    out = out,
                     blocks = answer.blocks,
                     prefix = listOf(
                         Run(
@@ -298,13 +344,13 @@ object DocxExporter {
                 )
                 answer.images.forEach { image ->
                     imagesById[image.id]?.let { asset ->
-                        body.append(imageParagraph(asset))
+                        out.append(imageParagraph(asset))
                     }
                 }
             }
         }
 
-        body.append(
+        out.append(
             paragraph(
                 runs = listOf(
                     Run(
@@ -317,27 +363,38 @@ object DocxExporter {
             )
         )
 
-        return """
-            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-                        xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"
-                        xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-                        xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
-                        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
-                        xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
-              <w:body>
-                ${body.toString().trimIndent()}
-                <w:sectPr>
-                  <w:pgSz w:w="11906" w:h="16838"/>
-                  <w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"
-                           w:header="708" w:footer="708" w:gutter="0"/>
-                  <w:cols w:space="708"/>
-                  <w:docGrid w:linePitch="360"/>
-                </w:sectPr>
-              </w:body>
-            </w:document>
-        """.trimIndent()
+        out.append(DOCUMENT_SUFFIX)
     }
+
+    private const val BODY_MARKER = "\u0000BODY\u0000"
+
+    // Same shell as the former one-shot template; the marker takes the place
+    // of the body so its indentation is trimmed identically. DOCUMENT_PREFIX
+    // ends with the four spaces that precede the body on its line, and
+    // DOCUMENT_SUFFIX starts with the newline after it.
+    private val DOCUMENT_TEMPLATE = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                    xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"
+                    xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                    xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+                    xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+                    xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+          <w:body>
+            $BODY_MARKER
+            <w:sectPr>
+              <w:pgSz w:w="11906" w:h="16838"/>
+              <w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"
+                       w:header="708" w:footer="708" w:gutter="0"/>
+              <w:cols w:space="708"/>
+              <w:docGrid w:linePitch="360"/>
+            </w:sectPr>
+          </w:body>
+        </w:document>
+    """.trimIndent()
+
+    private val DOCUMENT_PREFIX by lazy { DOCUMENT_TEMPLATE.substringBefore(BODY_MARKER) }
+    private val DOCUMENT_SUFFIX by lazy { DOCUMENT_TEMPLATE.substringAfter(BODY_MARKER) }
 
     private data class DocxImageAsset(
         val image: ImageContent,
@@ -454,7 +511,7 @@ object DocxExporter {
     }
 
     private fun appendRichBlocks(
-        body: StringBuilder,
+        out: Appendable,
         blocks: List<RichBlock>,
         prefix: List<Run>,
         sizeHalfPoints: Int,
@@ -463,7 +520,7 @@ object DocxExporter {
         indentLeft: Int = 0
     ) {
         if (blocks.isEmpty()) {
-            body.append(
+            out.append(
                 paragraph(
                     runs = prefix,
                     spacingAfter = spacingAfter,
@@ -477,7 +534,7 @@ object DocxExporter {
         blocks.forEachIndexed { index, block ->
             when (block) {
                 is RichBlock.Paragraph -> {
-                    body.append(
+                    out.append(
                         richParagraph(
                             inlines = block.inlines,
                             prefix = pendingPrefix,
@@ -496,7 +553,7 @@ object DocxExporter {
 
                 is RichBlock.Table -> {
                     if (pendingPrefix.isNotEmpty()) {
-                        body.append(
+                        out.append(
                             paragraph(
                                 runs = pendingPrefix,
                                 spacingAfter = 70,
@@ -505,8 +562,8 @@ object DocxExporter {
                         )
                         pendingPrefix = emptyList()
                     }
-                    body.append(richTable(block, sizeHalfPoints, color))
-                    body.append(
+                    out.append(richTable(block, sizeHalfPoints, color))
+                    out.append(
                         paragraph(
                             runs = emptyList(),
                             spacingAfter = if (index == blocks.lastIndex) spacingAfter else 80
@@ -516,7 +573,7 @@ object DocxExporter {
             }
         }
         if (pendingPrefix.isNotEmpty()) {
-            body.append(
+            out.append(
                 paragraph(
                     runs = pendingPrefix,
                     spacingAfter = spacingAfter,

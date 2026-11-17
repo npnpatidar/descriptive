@@ -4,6 +4,7 @@ import com.paperpractice.data.CategoryDetail
 import com.paperpractice.data.PaperDetail
 import com.paperpractice.data.QuestionDetail
 import com.paperpractice.domain.CategoryContent
+import com.paperpractice.domain.ImageContent
 import com.paperpractice.domain.PaperContent
 import com.paperpractice.domain.PaperJsonParser
 import com.paperpractice.domain.QuestionContent
@@ -606,6 +607,174 @@ class ExportersTest {
             .parse(ByteArrayInputStream(document))
         assertEquals("document", parsed.documentElement.localName)
     }
+
+    @Test
+    fun thousandQuestionPaperExportsThroughHtmlJsonAndDocx() {
+        val image = ImageContent(
+            id = "stress-image",
+            mimeType = "image/png",
+            width = 2,
+            height = 2,
+            bytes = byteArrayOf(1, 2, 3, 4, 5, 6)
+        )
+        val categories = (0 until 10).map { categoryIndex ->
+            CategoryContent(
+                categoryName = "Category $categoryIndex",
+                questions = (0 until 100).map { questionIndex ->
+                    val number = categoryIndex * 100 + questionIndex + 1
+                    QuestionContent(
+                        questionText = "Stress question $number",
+                        answerText = if (number == 500) {
+                            "| A | B |\n| :--- | ---: |\n| x | y |"
+                        } else {
+                            "Answer $number"
+                        },
+                        questionImages = if (number == 1 || number == 1000) {
+                            listOf(image.copy(id = "stress-image-$number"))
+                        } else {
+                            emptyList()
+                        }
+                    )
+                }
+            )
+        }
+        val big = PaperContent("Stress paper", categories)
+        assertEquals(1000, big.questionCount)
+
+        val html = HtmlExporter.build(big, includeAnswers = true)
+        assertTrue(html.startsWith("<!DOCTYPE html>"))
+        assertTrue(html.trimEnd().endsWith("</html>"))
+        assertEquals(
+            1000,
+            Regex("<article class=\"question\">").findAll(html).count()
+        )
+        assertTrue(html.contains("<span class=\"number\">1000</span>"))
+        assertTrue(html.contains("Stress question 1000"))
+        assertTrue(html.contains("data:image/png;base64,"))
+        assertTrue(html.contains("<table class=\"content-table\">"))
+
+        val parsed = PaperJsonParser.parse(JsonExporter.build(big, includeAnswers = true))
+        assertEquals(1000, parsed.questionCount)
+        assertEquals(10, parsed.categoryCount)
+        assertEquals(
+            "Stress question 1000",
+            parsed.categories.last().questions.last().questionText
+        )
+        assertArrayEquals(
+            image.bytes,
+            parsed.categories.first().questions.first().questionImages.single().bytes
+        )
+
+        val docx = ByteArrayOutputStream().also {
+            DocxExporter.write(big, includeAnswers = true, answersAtEnd = false, output = it)
+        }.toByteArray()
+        val entries = unzip(docx)
+        val document = entries["word/document.xml"] ?: error("document.xml missing")
+        val documentText = document.toString(Charsets.UTF_8)
+        assertEquals(
+            1000,
+            Regex("Stress question ").findAll(documentText).count()
+        )
+        assertTrue(documentText.contains("Stress question 1000"))
+        assertTrue(documentText.contains("<w:tbl>"))
+        assertTrue(entries.keys.any { it.startsWith("word/media/") })
+
+        val factory = DocumentBuilderFactory.newInstance()
+        factory.isNamespaceAware = true
+        assertEquals(
+            "document",
+            factory.newDocumentBuilder()
+                .parse(ByteArrayInputStream(document)).documentElement.localName
+        )
+    }
+
+    @Test
+    fun htmlWriteMatchesBuildBytes() {
+        listOf(content, richContent, mediaContent()).forEach { paper ->
+            listOf(true, false).forEach { includeAnswers ->
+                val fromBuild = HtmlExporter
+                    .build(paper, includeAnswers).toByteArray(Charsets.UTF_8)
+                val fromWrite = ByteArrayOutputStream().also {
+                    HtmlExporter.write(it, paper, includeAnswers)
+                }.toByteArray()
+
+                assertArrayEquals(
+                    "HTML bytes differ (includeAnswers=$includeAnswers)",
+                    fromBuild,
+                    fromWrite
+                )
+            }
+        }
+    }
+
+    @Test
+    fun jsonWriteMatchesBuildBytes() {
+        listOf(content, richContent, mediaContent()).forEach { paper ->
+            listOf(true, false).forEach { includeAnswers ->
+                val fromBuild = JsonExporter
+                    .build(paper, includeAnswers).toByteArray(Charsets.UTF_8)
+                val fromWrite = ByteArrayOutputStream().also {
+                    JsonExporter.write(it, paper, includeAnswers)
+                }.toByteArray()
+
+                assertArrayEquals(
+                    "JSON bytes differ (includeAnswers=$includeAnswers)",
+                    fromBuild,
+                    fromWrite
+                )
+            }
+        }
+    }
+
+    @Test
+    fun docxStreamProducesStableWellFormedDocumentXml() {
+        // DocxExporter has no public build()/String path (writeDocumentXml is
+        // private and writeCancellable is only the suspend variant of write), so
+        // there is no in-memory counterpart to byte-compare against. Lock the
+        // streamed document.xml itself instead.
+        fun streamedDocumentXml(): ByteArray = ByteArrayOutputStream().also {
+            DocxExporter.write(content, includeAnswers = true, answersAtEnd = false, output = it)
+        }.toByteArray().let { unzip(it)["word/document.xml"] ?: error("document.xml missing") }
+
+        val first = streamedDocumentXml()
+        val second = streamedDocumentXml()
+        assertArrayEquals("streamed document.xml is not byte-stable", first, second)
+
+        val text = first.toString(Charsets.UTF_8)
+        assertTrue(text.contains("History &amp; Science &lt;Test&gt;"))
+        assertTrue(text.contains("Explain the causes of World War I."))
+        assertTrue(text.contains("Alliances, militarism &amp; nationalism."))
+        assertTrue(text.contains("Answer:"))
+
+        val factory = DocumentBuilderFactory.newInstance()
+        factory.isNamespaceAware = true
+        assertEquals(
+            "document",
+            factory.newDocumentBuilder()
+                .parse(ByteArrayInputStream(first)).documentElement.localName
+        )
+    }
+
+    private fun mediaContent(): PaperContent = PaperContent(
+        paperName = "Media",
+        categories = listOf(
+            CategoryContent(
+                categoryName = "Media",
+                questions = listOf(
+                    QuestionContent(
+                        questionText = "Show the diagram.",
+                        answerText = "See the answer diagram.",
+                        questionImages = listOf(
+                            ImageContent("q", "image/png", 2, 2, byteArrayOf(1, 2, 3, 4))
+                        ),
+                        answerImages = listOf(
+                            ImageContent("a", "image/jpeg", 3, 2, byteArrayOf(5, 6, 7))
+                        )
+                    )
+                )
+            )
+        )
+    )
 
     private fun unzip(bytes: ByteArray): Map<String, ByteArray> {
         val result = linkedMapOf<String, ByteArray>()
